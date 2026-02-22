@@ -18,10 +18,13 @@ pub struct Renderer {
     size: PhysicalSize<u32>,
     render_pipeline: wgpu::RenderPipeline,
     crosshair_pipeline: wgpu::RenderPipeline,
+    hotbar_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     vertex_count: u32,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    hotbar_vertex_buffer: wgpu::Buffer,
+    hotbar_vertex_count: u32,
     depth_texture: DepthTexture,
 }
 
@@ -191,6 +194,56 @@ impl Renderer {
             multiview: None,
         });
 
+        let hotbar_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("hotbar shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/hotbar.wgsl").into()),
+        });
+
+        let hotbar_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("hotbar pipeline layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+
+        let hotbar_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("hotbar pipeline"),
+            layout: Some(&hotbar_layout),
+            vertex: wgpu::VertexState {
+                module: &hotbar_shader,
+                entry_point: "vs_main",
+                buffers: &[UiVertex::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &hotbar_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DepthTexture::FORMAT,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
+        let hotbar_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("empty hotbar vertices"),
+            size: 4,
+            usage: wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: false,
+        });
+
         let depth_texture = DepthTexture::new(&device, &config, "depth texture");
 
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -208,10 +261,13 @@ impl Renderer {
             size,
             render_pipeline,
             crosshair_pipeline,
+            hotbar_pipeline,
             vertex_buffer,
             vertex_count: 0,
             camera_buffer,
             camera_bind_group,
+            hotbar_vertex_buffer,
+            hotbar_vertex_count: 0,
             depth_texture,
         }
     }
@@ -246,6 +302,46 @@ impl Renderer {
         uniform.view_proj = camera.view_proj_matrix().into();
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
+    }
+
+    pub fn update_hotbar(&mut self, selected: usize, palette: &[[f32; 3]; 10]) {
+        let width = 0.11;
+        let height = 0.1;
+        let gap = 0.012;
+        let total = 10.0 * width + 9.0 * gap;
+        let start_x = -total * 0.5;
+        let y = -0.92;
+
+        let mut vertices = Vec::new();
+
+        for (i, color) in palette.iter().enumerate() {
+            let x0 = start_x + i as f32 * (width + gap);
+            let x1 = x0 + width;
+            let y0 = y;
+            let y1 = y + height;
+
+            append_rect(&mut vertices, x0, y0, x1, y1, *color);
+
+            let border_color = if i == selected {
+                [1.0, 1.0, 1.0]
+            } else {
+                [0.1, 0.1, 0.1]
+            };
+            let b = 0.008;
+            append_rect(&mut vertices, x0 - b, y0 - b, x1 + b, y0, border_color);
+            append_rect(&mut vertices, x0 - b, y1, x1 + b, y1 + b, border_color);
+            append_rect(&mut vertices, x0 - b, y0, x0, y1, border_color);
+            append_rect(&mut vertices, x1, y0, x1 + b, y1, border_color);
+        }
+
+        self.hotbar_vertex_count = vertices.len() as u32;
+        self.hotbar_vertex_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("hotbar mesh"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
     }
 
     pub fn render(&mut self) {
@@ -306,6 +402,10 @@ impl Renderer {
 
             pass.set_pipeline(&self.crosshair_pipeline);
             pass.draw(0..4, 0..1);
+
+            pass.set_pipeline(&self.hotbar_pipeline);
+            pass.set_vertex_buffer(0, self.hotbar_vertex_buffer.slice(..));
+            pass.draw(0..self.hotbar_vertex_count, 0..1);
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -341,6 +441,65 @@ impl DepthTexture {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         Self { view }
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct UiVertex {
+    position: [f32; 2],
+    color: [f32; 3],
+}
+
+impl UiVertex {
+    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+        use std::mem;
+
+        wgpu::VertexBufferLayout {
+            array_stride: mem::size_of::<UiVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+            ],
+        }
+    }
+}
+
+fn append_rect(vertices: &mut Vec<UiVertex>, x0: f32, y0: f32, x1: f32, y1: f32, color: [f32; 3]) {
+    vertices.extend_from_slice(&[
+        UiVertex {
+            position: [x0, y0],
+            color,
+        },
+        UiVertex {
+            position: [x1, y0],
+            color,
+        },
+        UiVertex {
+            position: [x1, y1],
+            color,
+        },
+        UiVertex {
+            position: [x1, y1],
+            color,
+        },
+        UiVertex {
+            position: [x0, y1],
+            color,
+        },
+        UiVertex {
+            position: [x0, y0],
+            color,
+        },
+    ]);
 }
 
 #[repr(C)]

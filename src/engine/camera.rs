@@ -1,7 +1,7 @@
 use cgmath::{perspective, vec3, Deg, InnerSpace, Matrix4, Point3, Vector3};
 use winit::keyboard::KeyCode;
 
-use crate::world::world::World;
+use crate::world::{chunk::Block, world::World};
 
 use super::input::InputState;
 
@@ -23,18 +23,18 @@ pub struct Camera {
 impl Camera {
     pub fn new() -> Self {
         Self {
-            position: Point3::new(8.0, 10.0, 10.0),
+            position: Point3::new(8.0, 16.0, 10.0),
             yaw: -90.0,
             pitch: -15.0,
             aspect: 16.0 / 9.0,
             fov_y: 60.0,
             z_near: 0.1,
-            z_far: 200.0,
-            speed: 0.05,
+            z_far: 300.0,
+            speed: 0.08,
             mouse_sensitivity: 0.2,
             velocity_y: 0.0,
             grounded: false,
-            eye_height: 2.0,
+            eye_height: 1.8,
         }
     }
 
@@ -68,7 +68,7 @@ impl Camera {
             self.position -= right * self.speed;
         }
 
-        let jump_velocity = 0.35;
+        let jump_velocity = 0.38;
         let gravity = 0.02;
 
         if input.is_pressed(KeyCode::Space) && self.grounded {
@@ -79,13 +79,27 @@ impl Camera {
         self.velocity_y -= gravity;
         self.position.y += self.velocity_y;
 
-        if let Some(surface_height) = world.surface_height(self.position.x, self.position.z) {
-            let feet_y = self.position.y - self.eye_height;
-            if feet_y <= surface_height {
-                self.position.y = surface_height + self.eye_height;
+        let feet_y = self.position.y - self.eye_height;
+        if let Some(ground_y) =
+            world.highest_solid_below(self.position.x, self.position.z, feet_y + 0.1)
+        {
+            if feet_y <= ground_y {
+                self.position.y = ground_y + self.eye_height;
                 self.velocity_y = 0.0;
                 self.grounded = true;
+            } else {
+                self.grounded = false;
             }
+        } else {
+            self.grounded = false;
+        }
+
+        let head_x = self.position.x.floor() as i32;
+        let head_y = self.position.y.floor() as i32;
+        let head_z = self.position.z.floor() as i32;
+        if world.block_at(head_x, head_y, head_z) != Block::Air && self.velocity_y > 0.0 {
+            self.position.y = head_y as f32 - 0.01;
+            self.velocity_y = 0.0;
         }
 
         if input.is_pressed(KeyCode::ArrowLeft) {
