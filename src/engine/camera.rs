@@ -71,8 +71,8 @@ impl Camera {
 
         self.apply_horizontal_collision(move_delta, world);
 
-        let jump_velocity = 0.30;
-        let gravity = 0.012;
+        let jump_velocity = 0.05;
+        let gravity = 0.001;
 
         if input.is_pressed(KeyCode::Space) && self.grounded {
             self.velocity_y = jump_velocity;
@@ -151,7 +151,7 @@ impl Camera {
             return;
         }
 
-        let player_radius = 0.5;
+        let player_radius = 0.3;
         let mut candidate = self.position;
 
         candidate.x += move_delta.x;
@@ -173,7 +173,7 @@ impl Camera {
         // Avoid side-colliding with the top face of a block when stepping/falling off an edge.
         // Keeping a slightly thicker clearance near the feet prevents the player from
         // "sticking" while dropping down from higher blocks.
-        let feet_clearance = 0.12;
+        let feet_clearance = 0.2;
         let min_x = (position.x - radius).floor() as i32;
         let max_x = (position.x + radius).floor() as i32;
         let min_z = (position.z - radius).floor() as i32;
