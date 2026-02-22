@@ -119,7 +119,8 @@ async fn run() {
     set_mouse_lock(&window, true);
 
     let mut renderer = Renderer::new(window.clone()).await;
-    renderer.build_world_mesh(&world);
+    renderer.build_chunk_mesh(&world.chunk);
+    renderer.build_dynamic_mesh(&world);
     renderer.update_hotbar(
         selected_hotbar,
         &inventory_colors(),
@@ -172,11 +173,11 @@ async fn run() {
                         MouseButton::Left => match INVENTORY[selected_hotbar] {
                             InventoryItem::Pistol => {
                                 world.spawn_bullet(camera.position, camera.look_direction());
-                                renderer.build_world_mesh(&world);
+                                renderer.build_dynamic_mesh(&world);
                             }
                             InventoryItem::Explosive => {
                                 world.spawn_explosive(camera.position, camera.look_direction());
-                                renderer.build_world_mesh(&world);
+                                renderer.build_dynamic_mesh(&world);
                             }
                             InventoryItem::Block(_) => {
                                 if world.break_block_from_ray(
@@ -184,7 +185,8 @@ async fn run() {
                                     camera.look_direction(),
                                     6.0,
                                 ) {
-                                    renderer.build_world_mesh(&world);
+                                    renderer.build_chunk_mesh(&world.chunk);
+                                    renderer.build_dynamic_mesh(&world);
                                 }
                             }
                         },
@@ -196,7 +198,8 @@ async fn run() {
                                     6.0,
                                     block,
                                 ) {
-                                    renderer.build_world_mesh(&world);
+                                    renderer.build_chunk_mesh(&world.chunk);
+                                    renderer.build_dynamic_mesh(&world);
                                 }
                             }
                         }
@@ -231,6 +234,9 @@ async fn run() {
                 let had_explosives = !world.explosives.is_empty();
                 let bullets_changed = world.update_bullets();
                 let explosives_changed = world.update_explosives();
+                if bullets_changed || explosives_changed {
+                    renderer.build_chunk_mesh(&world.chunk);
+                }
                 world.update_particles();
                 let (mobs_changed, damage) = world.update_mobs(camera.position);
                 if damage > 0.0 {
@@ -254,7 +260,7 @@ async fn run() {
                     || explosives_changed
                     || !world.particles.is_empty()
                 {
-                    renderer.build_world_mesh(&world);
+                    renderer.build_dynamic_mesh(&world);
                 }
                 renderer.update_camera(&camera);
             }

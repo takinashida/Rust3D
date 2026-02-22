@@ -46,10 +46,16 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn from_world(world: &World) -> Self {
+    pub fn from_chunk(chunk: &Chunk) -> Self {
         let mut vertices = Vec::new();
 
-        append_chunk_mesh(&mut vertices, &world.chunk);
+        append_chunk_mesh(&mut vertices, chunk);
+
+        Self { vertices }
+    }
+
+    pub fn dynamic_from_world(world: &World) -> Self {
+        let mut vertices = Vec::new();
 
         for bullet in &world.bullets {
             append_cube(
