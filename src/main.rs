@@ -105,12 +105,13 @@ async fn run() {
     camera.aspect = (size.width.max(1) as f32) / (size.height.max(1) as f32);
     let mut input = InputState::new();
     let mut selected_hotbar = 0usize;
+    let mut player_health = 100.0f32;
 
     set_mouse_lock(&window, true);
 
     let mut renderer = Renderer::new(window.clone()).await;
     renderer.build_world_mesh(&world);
-    renderer.update_hotbar(selected_hotbar, &inventory_colors());
+    renderer.update_hotbar(selected_hotbar, &inventory_colors(), player_health / 100.0);
 
     let _ = event_loop.run(move |event, target| match event {
         Event::DeviceEvent {
@@ -134,7 +135,11 @@ async fn run() {
                     if event.state == ElementState::Pressed {
                         if let Some(slot) = hotbar_slot_for_key(code) {
                             selected_hotbar = slot;
-                            renderer.update_hotbar(selected_hotbar, &inventory_colors());
+                            renderer.update_hotbar(
+                                selected_hotbar,
+                                &inventory_colors(),
+                                player_health / 100.0,
+                            );
                         }
                     }
                 }
@@ -180,8 +185,13 @@ async fn run() {
         Event::AboutToWait => {
             camera.update(&input, &world);
             let had_bullets = !world.bullets.is_empty();
-            let world_changed = world.update_bullets();
-            if had_bullets || world_changed {
+            let bullets_changed = world.update_bullets();
+            let (mobs_changed, damage) = world.update_mobs(camera.position);
+            if damage > 0.0 {
+                player_health = (player_health - damage).max(0.0);
+                renderer.update_hotbar(selected_hotbar, &inventory_colors(), player_health / 100.0);
+            }
+            if had_bullets || bullets_changed || mobs_changed {
                 renderer.build_world_mesh(&world);
             }
             renderer.update_camera(&camera);

@@ -346,7 +346,7 @@ impl Renderer {
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 
-    pub fn update_hotbar(&mut self, selected: usize, palette: &[[f32; 3]]) {
+    pub fn update_hotbar(&mut self, selected: usize, palette: &[[f32; 3]], health: f32) {
         let width = 0.11;
         let height = 0.1;
         let gap = 0.012;
@@ -375,6 +375,31 @@ impl Renderer {
             append_rect(&mut vertices, x0 - b, y0, x0, y1, border_color);
             append_rect(&mut vertices, x1, y0, x1 + b, y1, border_color);
         }
+
+        let hp = health.clamp(0.0, 1.0);
+        let bar_w = 0.45;
+        let bar_h = 0.04;
+        let bx0 = -bar_w * 0.5;
+        let by0 = 0.88;
+        let bx1 = bx0 + bar_w;
+        let by1 = by0 + bar_h;
+        append_rect(
+            &mut vertices,
+            bx0 - 0.01,
+            by0 - 0.01,
+            bx1 + 0.01,
+            by1 + 0.01,
+            [0.06, 0.06, 0.06],
+        );
+        let fill_x1 = bx0 + bar_w * hp;
+        append_rect(
+            &mut vertices,
+            bx0,
+            by0,
+            fill_x1,
+            by1,
+            [0.82, 0.16 + 0.55 * hp, 0.16],
+        );
 
         self.hotbar_vertex_count = vertices.len() as u32;
         self.hotbar_vertex_buffer =
