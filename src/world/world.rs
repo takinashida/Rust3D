@@ -4,6 +4,13 @@ use crate::world::chunk::{Block, Chunk, CHUNK_DEPTH, CHUNK_HEIGHT, CHUNK_WIDTH};
 
 const MAX_MOBS: usize = 20;
 const MAX_PARTICLES_PER_BURST: usize = 4;
+const MAX_TOTAL_PARTICLES: usize = 384;
+const PARTICLE_DIRECTIONS: [Vector3<f32>; 4] = [
+    Vector3::new(0.778_673_7, 0.607_365_8, 0.157_359_87),
+    Vector3::new(0.489_866_94, 0.251_622_74, 0.834_767_5),
+    Vector3::new(-0.239_973_62, 0.859_351_7, 0.451_350_03),
+    Vector3::new(-0.578_730_64, 0.883_557_26, 0.043_987_31),
+];
 
 #[derive(Clone, Copy)]
 pub struct Bullet {
@@ -60,7 +67,7 @@ impl World {
             chunk,
             bullets: Vec::new(),
             mobs: Vec::new(),
-            particles: Vec::new(),
+            particles: Vec::with_capacity(MAX_TOTAL_PARTICLES),
             explosives: Vec::new(),
             spawn_timer: 0.0,
         };
@@ -347,12 +354,14 @@ impl World {
         life: f32,
         size: f32,
     ) {
-        let particle_count = count.min(MAX_PARTICLES_PER_BURST);
+        if self.particles.len() >= MAX_TOTAL_PARTICLES {
+            return;
+        }
+
+        let free_slots = MAX_TOTAL_PARTICLES - self.particles.len();
+        let particle_count = count.min(MAX_PARTICLES_PER_BURST).min(free_slots);
         for i in 0..particle_count {
-            let a = i as f32 * 0.618_033_95;
-            let b = i as f32 * 0.414_213_57;
-            let dir = Vector3::new(a.cos() * b.sin(), (b * 1.3).cos().abs(), a.sin() * b.cos())
-                .normalize();
+            let dir = PARTICLE_DIRECTIONS[i % PARTICLE_DIRECTIONS.len()];
             self.particles.push(Particle {
                 position: origin,
                 velocity: dir * speed,
