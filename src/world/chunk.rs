@@ -1,6 +1,7 @@
 pub const CHUNK_WIDTH: usize = 512;
 pub const CHUNK_DEPTH: usize = 512;
 pub const CHUNK_HEIGHT: usize = 64;
+pub const CHUNK_REGION_SIZE: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Block {
@@ -20,17 +21,80 @@ pub enum Block {
 
 pub struct Chunk {
     blocks: Vec<Block>,
+    dirty_regions: Vec<bool>,
 }
 
 impl Chunk {
     pub fn new() -> Self {
+        let regions_x = CHUNK_WIDTH / CHUNK_REGION_SIZE;
+        let regions_y = CHUNK_HEIGHT / CHUNK_REGION_SIZE;
+        let regions_z = CHUNK_DEPTH / CHUNK_REGION_SIZE;
         Self {
             blocks: vec![Block::Air; CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_DEPTH],
+            dirty_regions: vec![true; regions_x * regions_y * regions_z],
         }
     }
 
     fn index(x: usize, y: usize, z: usize) -> usize {
         x + z * CHUNK_WIDTH + y * CHUNK_WIDTH * CHUNK_DEPTH
+    }
+
+    fn region_dims() -> (usize, usize, usize) {
+        (
+            CHUNK_WIDTH / CHUNK_REGION_SIZE,
+            CHUNK_HEIGHT / CHUNK_REGION_SIZE,
+            CHUNK_DEPTH / CHUNK_REGION_SIZE,
+        )
+    }
+
+    fn region_index(rx: usize, ry: usize, rz: usize) -> usize {
+        let (regions_x, _, regions_z) = Self::region_dims();
+        rx + rz * regions_x + ry * regions_x * regions_z
+    }
+
+    fn mark_region_dirty_by_block(&mut self, x: usize, y: usize, z: usize) {
+        let (regions_x, regions_y, regions_z) = Self::region_dims();
+        let rx = x / CHUNK_REGION_SIZE;
+        let ry = y / CHUNK_REGION_SIZE;
+        let rz = z / CHUNK_REGION_SIZE;
+
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    let nrx = rx as i32 + dx;
+                    let nry = ry as i32 + dy;
+                    let nrz = rz as i32 + dz;
+                    if nrx < 0
+                        || nry < 0
+                        || nrz < 0
+                        || nrx >= regions_x as i32
+                        || nry >= regions_y as i32
+                        || nrz >= regions_z as i32
+                    {
+                        continue;
+                    }
+                    let idx = Self::region_index(nrx as usize, nry as usize, nrz as usize);
+                    self.dirty_regions[idx] = true;
+                }
+            }
+        }
+    }
+
+    pub fn take_dirty_regions(&mut self) -> Vec<[usize; 3]> {
+        let (regions_x, regions_y, regions_z) = Self::region_dims();
+        let mut out = Vec::new();
+        for ry in 0..regions_y {
+            for rz in 0..regions_z {
+                for rx in 0..regions_x {
+                    let idx = Self::region_index(rx, ry, rz);
+                    if self.dirty_regions[idx] {
+                        self.dirty_regions[idx] = false;
+                        out.push([rx, ry, rz]);
+                    }
+                }
+            }
+        }
+        out
     }
 
     pub fn generate(&mut self) {
@@ -172,7 +236,10 @@ impl Chunk {
     pub fn set(&mut self, x: usize, y: usize, z: usize, block: Block) {
         if x < CHUNK_WIDTH && y < CHUNK_HEIGHT && z < CHUNK_DEPTH {
             let idx = Self::index(x, y, z);
-            self.blocks[idx] = block;
+            if self.blocks[idx] != block {
+                self.blocks[idx] = block;
+                self.mark_region_dirty_by_block(x, y, z);
+            }
         }
     }
 }
