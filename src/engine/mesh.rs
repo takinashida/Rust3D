@@ -135,12 +135,7 @@ fn append_cube(vertices: &mut Vec<Vertex>, origin: Point3<f32>, size: f32, color
     append_box(vertices, origin, [size, size, size], color);
 }
 
-fn append_box(
-    vertices: &mut Vec<Vertex>,
-    origin: Point3<f32>,
-    size: [f32; 3],
-    color: [f32; 3],
-) {
+fn append_box(vertices: &mut Vec<Vertex>, origin: Point3<f32>, size: [f32; 3], color: [f32; 3]) {
     for (normal, quad) in cuboid_faces(origin.x, origin.y, origin.z, size[0], size[1], size[2]) {
         push_quad(vertices, quad, color, normal);
     }
@@ -186,7 +181,14 @@ fn cube_faces(x: f32, y: f32, z: f32, size: f32) -> [([i32; 3], [[f32; 3]; 4]); 
     cuboid_faces(x, y, z, size, size, size)
 }
 
-fn cuboid_faces(x: f32, y: f32, z: f32, sx: f32, sy: f32, sz: f32) -> [([i32; 3], [[f32; 3]; 4]); 6] {
+fn cuboid_faces(
+    x: f32,
+    y: f32,
+    z: f32,
+    sx: f32,
+    sy: f32,
+    sz: f32,
+) -> [([i32; 3], [[f32; 3]; 4]); 6] {
     [
         (
             [0, 0, 1],

@@ -7,8 +7,7 @@ const MAX_MOBS: usize = 15;
 #[derive(Clone, Copy)]
 pub struct Bullet {
     pub position: Point3<f32>,
-    pub direction: Vector3<f32>,
-    pub speed: f32,
+    pub velocity: Vector3<f32>,
     pub damage: f32,
     pub max_distance: f32,
     pub traveled: f32,
@@ -20,6 +19,9 @@ pub struct Mob {
     pub health: f32,
     pub radius: f32,
     pub height: f32,
+    pub velocity_y: f32,
+    pub grounded: bool,
+    pub jump_cooldown: f32,
     pub attack_cooldown: f32,
 }
 
@@ -57,6 +59,9 @@ impl World {
                 health: 100.0,
                 radius: 0.4,
                 height: 1.8,
+                velocity_y: 0.0,
+                grounded: true,
+                jump_cooldown: 0.0,
                 attack_cooldown: 0.0,
             });
         }
@@ -98,8 +103,7 @@ impl World {
         let dir = direction.normalize();
         self.bullets.push(Bullet {
             position: origin + dir * 0.5,
-            direction: dir,
-            speed: 0.9,
+            velocity: dir * 0.9,
             damage: 34.0,
             max_distance: 35.0,
             traveled: 0.0,
@@ -112,8 +116,9 @@ impl World {
         for i in (0..self.bullets.len()).rev() {
             let bullet = &mut self.bullets[i];
             let previous_position = bullet.position;
-            bullet.position += bullet.direction * bullet.speed;
-            bullet.traveled += bullet.speed;
+            bullet.velocity.y -= 0.002;
+            bullet.position += bullet.velocity;
+            bullet.traveled += bullet.velocity.magnitude();
 
             let x = bullet.position.x.floor() as i32;
             let y = bullet.position.y.floor() as i32;
@@ -181,46 +186,77 @@ impl World {
                 let speed = if distance > 1.4 { 0.04 } else { 0.02 };
                 let dir = toward_player / distance;
                 let proposed_x = mob.position.x + dir.x * speed;
-                if !mob_collides(
-                    &self.chunk,
-                    proposed_x,
-                    mob.position.y,
-                    mob.position.z,
-                    mob.radius,
-                    mob.height,
-                ) && !mob_collides_with_others(proposed_x, mob.position.z, mob.radius, head)
-                    && !mob_collides_with_others(proposed_x, mob.position.z, mob.radius, rest)
-                {
+                let can_move_x =
+                    !mob_collides(
+                        &self.chunk,
+                        proposed_x,
+                        mob.position.y,
+                        mob.position.z,
+                        mob.radius,
+                        mob.height,
+                    ) && !mob_collides_with_others(proposed_x, mob.position.z, mob.radius, head)
+                        && !mob_collides_with_others(proposed_x, mob.position.z, mob.radius, rest);
+                if can_move_x {
                     mob.position.x = proposed_x;
                     moved = true;
                 }
 
                 let proposed_z = mob.position.z + dir.z * speed;
-                if !mob_collides(
-                    &self.chunk,
-                    mob.position.x,
-                    mob.position.y,
-                    proposed_z,
-                    mob.radius,
-                    mob.height,
-                ) && !mob_collides_with_others(mob.position.x, proposed_z, mob.radius, head)
-                    && !mob_collides_with_others(mob.position.x, proposed_z, mob.radius, rest)
-                {
+                let can_move_z =
+                    !mob_collides(
+                        &self.chunk,
+                        mob.position.x,
+                        mob.position.y,
+                        proposed_z,
+                        mob.radius,
+                        mob.height,
+                    ) && !mob_collides_with_others(mob.position.x, proposed_z, mob.radius, head)
+                        && !mob_collides_with_others(mob.position.x, proposed_z, mob.radius, rest);
+                if can_move_z {
                     mob.position.z = proposed_z;
                     moved = true;
                 }
 
-                if let Some(ground_y) = highest_solid_below_chunk(
-                    &self.chunk,
-                    mob.position.x,
-                    mob.position.z,
-                    CHUNK_SIZE as f32 - 1.0,
-                ) {
-                    mob.position.y = ground_y;
+                if mob.grounded && !can_move_x && !can_move_z && mob.jump_cooldown <= 0.0 {
+                    mob.velocity_y = 0.06;
+                    mob.grounded = false;
+                    mob.jump_cooldown = 20.0;
+                    moved = true;
                 }
                 if moved {
                     world_changed = true;
                 }
+            }
+
+            mob.velocity_y -= 0.003;
+            let proposed_y = mob.position.y + mob.velocity_y;
+            if !mob_collides(
+                &self.chunk,
+                mob.position.x,
+                proposed_y,
+                mob.position.z,
+                mob.radius,
+                mob.height,
+            ) {
+                mob.position.y = proposed_y;
+                mob.grounded = false;
+            } else {
+                if mob.velocity_y < 0.0 {
+                    if let Some(ground_y) = highest_solid_below_chunk(
+                        &self.chunk,
+                        mob.position.x,
+                        mob.position.z,
+                        mob.position.y + 0.5,
+                    ) {
+                        mob.position.y = ground_y;
+                    }
+                    mob.grounded = true;
+                }
+                mob.velocity_y = 0.0;
+            }
+
+            if mob.jump_cooldown > 0.0 {
+                mob.jump_cooldown -= 1.0;
             }
 
             if mob.attack_cooldown > 0.0 {
