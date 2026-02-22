@@ -169,12 +169,17 @@ impl Camera {
     fn collides_at(&self, position: Point3<f32>, radius: f32, world: &World) -> bool {
         let feet = position.y - self.eye_height;
         let head = position.y - 0.1;
+        let skin = 0.02;
         let min_x = (position.x - radius).floor() as i32;
         let max_x = (position.x + radius).floor() as i32;
         let min_z = (position.z - radius).floor() as i32;
         let max_z = (position.z + radius).floor() as i32;
-        let min_y = feet.floor() as i32;
-        let max_y = head.floor() as i32;
+        let min_y = (feet + skin).floor() as i32;
+        let max_y = (head - skin).floor() as i32;
+
+        if min_y > max_y {
+            return false;
+        }
 
         for x in min_x..=max_x {
             for y in min_y..=max_y {
