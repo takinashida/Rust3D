@@ -1,7 +1,7 @@
 use cgmath::Point3;
 
 use crate::world::{
-    chunk::{Block, Chunk, CHUNK_DEPTH, CHUNK_HEIGHT, CHUNK_WIDTH},
+    chunk::{Block, Chunk, CHUNK_DEPTH, CHUNK_HEIGHT, CHUNK_REGION_SIZE, CHUNK_WIDTH},
     world::World,
 };
 
@@ -46,14 +46,6 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn from_chunk(chunk: &Chunk) -> Self {
-        let mut vertices = Vec::new();
-
-        append_chunk_mesh(&mut vertices, chunk);
-
-        Self { vertices }
-    }
-
     pub fn dynamic_from_world(world: &World) -> Self {
         let mut vertices = Vec::new();
 
@@ -123,29 +115,47 @@ impl Mesh {
     }
 }
 
-fn append_chunk_mesh(vertices: &mut Vec<Vertex>, chunk: &Chunk) {
-    for x in 0..CHUNK_WIDTH as i32 {
-        for y in 0..CHUNK_HEIGHT as i32 {
-            for z in 0..CHUNK_DEPTH as i32 {
+pub fn mesh_region_dims() -> (usize, usize, usize) {
+    (
+        CHUNK_WIDTH / CHUNK_REGION_SIZE,
+        CHUNK_HEIGHT / CHUNK_REGION_SIZE,
+        CHUNK_DEPTH / CHUNK_REGION_SIZE,
+    )
+}
+
+pub fn mesh_region_count() -> usize {
+    let (rx, ry, rz) = mesh_region_dims();
+    rx * ry * rz
+}
+
+pub fn region_index(rx: usize, ry: usize, rz: usize) -> usize {
+    let (regions_x, _, regions_z) = mesh_region_dims();
+    rx + rz * regions_x + ry * regions_x * regions_z
+}
+
+pub fn append_chunk_region_mesh(vertices: &mut Vec<Vertex>, chunk: &Chunk, region: [usize; 3]) {
+    let (regions_x, regions_y, regions_z) = mesh_region_dims();
+    let [rx, ry, rz] = region;
+    if rx >= regions_x || ry >= regions_y || rz >= regions_z {
+        return;
+    }
+
+    let x_start = (rx * CHUNK_REGION_SIZE) as i32;
+    let y_start = (ry * CHUNK_REGION_SIZE) as i32;
+    let z_start = (rz * CHUNK_REGION_SIZE) as i32;
+    let x_end = ((rx + 1) * CHUNK_REGION_SIZE).min(CHUNK_WIDTH) as i32;
+    let y_end = ((ry + 1) * CHUNK_REGION_SIZE).min(CHUNK_HEIGHT) as i32;
+    let z_end = ((rz + 1) * CHUNK_REGION_SIZE).min(CHUNK_DEPTH) as i32;
+
+    for x in x_start..x_end {
+        for y in y_start..y_end {
+            for z in z_start..z_end {
                 let block = chunk.get_i32(x, y, z);
                 if block == Block::Air {
                     continue;
                 }
 
-                let color = match block {
-                    Block::Grass => [0.25, 0.78, 0.22],
-                    Block::Dirt => [0.55, 0.35, 0.2],
-                    Block::Stone => [0.55, 0.58, 0.62],
-                    Block::Sand => [0.88, 0.82, 0.55],
-                    Block::Wood => [0.52, 0.34, 0.19],
-                    Block::Planks => [0.72, 0.56, 0.34],
-                    Block::Bricks => [0.68, 0.27, 0.24],
-                    Block::Glass => [0.6, 0.85, 0.95],
-                    Block::Leaf => [0.22, 0.56, 0.18],
-                    Block::Snow => [0.92, 0.94, 0.98],
-                    Block::Target => [0.9, 0.15, 0.15],
-                    Block::Air => [0.0, 0.0, 0.0],
-                };
+                let color = block_color(block);
 
                 for (normal, quad) in cube_faces(x as f32, y as f32, z as f32, 1.0) {
                     let nx = x + normal[0];
@@ -160,6 +170,23 @@ fn append_chunk_mesh(vertices: &mut Vec<Vertex>, chunk: &Chunk) {
                 }
             }
         }
+    }
+}
+
+fn block_color(block: Block) -> [f32; 3] {
+    match block {
+        Block::Grass => [0.25, 0.78, 0.22],
+        Block::Dirt => [0.55, 0.35, 0.2],
+        Block::Stone => [0.55, 0.58, 0.62],
+        Block::Sand => [0.88, 0.82, 0.55],
+        Block::Wood => [0.52, 0.34, 0.19],
+        Block::Planks => [0.72, 0.56, 0.34],
+        Block::Bricks => [0.68, 0.27, 0.24],
+        Block::Glass => [0.6, 0.85, 0.95],
+        Block::Leaf => [0.22, 0.56, 0.18],
+        Block::Snow => [0.92, 0.94, 0.98],
+        Block::Target => [0.9, 0.15, 0.15],
+        Block::Air => [0.0, 0.0, 0.0],
     }
 }
 

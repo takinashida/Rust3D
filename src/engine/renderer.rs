@@ -4,7 +4,7 @@ use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{
-    engine::mesh::{Mesh, Vertex},
+    engine::mesh::{append_chunk_region_mesh, mesh_region_count, region_index, Mesh, Vertex},
     world::{chunk::Chunk, world::World},
 };
 
@@ -20,8 +20,8 @@ pub struct Renderer {
     sky_pipeline: wgpu::RenderPipeline,
     crosshair_pipeline: wgpu::RenderPipeline,
     hotbar_pipeline: wgpu::RenderPipeline,
-    static_vertex_buffer: wgpu::Buffer,
-    static_vertex_count: u32,
+    static_region_vertex_buffers: Vec<wgpu::Buffer>,
+    static_region_vertex_counts: Vec<u32>,
     dynamic_vertex_buffer: wgpu::Buffer,
     dynamic_vertex_count: u32,
     camera_buffer: wgpu::Buffer,
@@ -289,12 +289,17 @@ impl Renderer {
 
         let depth_texture = DepthTexture::new(&device, &config, "depth texture");
 
-        let static_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("empty static vertices"),
-            size: 4,
-            usage: wgpu::BufferUsages::VERTEX,
-            mapped_at_creation: false,
-        });
+        let static_region_vertex_buffers = (0..mesh_region_count())
+            .map(|_| {
+                device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("empty static region vertices"),
+                    size: 4,
+                    usage: wgpu::BufferUsages::VERTEX,
+                    mapped_at_creation: false,
+                })
+            })
+            .collect::<Vec<_>>();
+        let static_region_vertex_counts = vec![0; mesh_region_count()];
 
         let dynamic_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("empty dynamic vertices"),
@@ -313,8 +318,8 @@ impl Renderer {
             sky_pipeline,
             crosshair_pipeline,
             hotbar_pipeline,
-            static_vertex_buffer,
-            static_vertex_count: 0,
+            static_region_vertex_buffers,
+            static_region_vertex_counts,
             dynamic_vertex_buffer,
             dynamic_vertex_count: 0,
             camera_buffer,
@@ -338,16 +343,40 @@ impl Renderer {
     }
 
     pub fn build_chunk_mesh(&mut self, chunk: &Chunk) {
-        let mesh = Mesh::from_chunk(chunk);
-        self.static_vertex_count = mesh.vertices.len() as u32;
+        let region_count_x =
+            crate::world::chunk::CHUNK_WIDTH / crate::world::chunk::CHUNK_REGION_SIZE;
+        let region_count_y =
+            crate::world::chunk::CHUNK_HEIGHT / crate::world::chunk::CHUNK_REGION_SIZE;
+        let region_count_z =
+            crate::world::chunk::CHUNK_DEPTH / crate::world::chunk::CHUNK_REGION_SIZE;
+        let mut regions = Vec::with_capacity(mesh_region_count());
+        for ry in 0..region_count_y {
+            for rz in 0..region_count_z {
+                for rx in 0..region_count_x {
+                    regions.push([rx, ry, rz]);
+                }
+            }
+        }
+        self.rebuild_chunk_regions(chunk, &regions);
+    }
 
-        self.static_vertex_buffer =
-            self.device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("voxel static mesh"),
-                    contents: bytemuck::cast_slice(&mesh.vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+    pub fn rebuild_chunk_regions(&mut self, chunk: &Chunk, regions: &[[usize; 3]]) {
+        for &[rx, ry, rz] in regions {
+            let region_idx = region_index(rx, ry, rz);
+            if region_idx >= self.static_region_vertex_buffers.len() {
+                continue;
+            }
+            let mut vertices = Vec::new();
+            append_chunk_region_mesh(&mut vertices, chunk, [rx, ry, rz]);
+            self.static_region_vertex_counts[region_idx] = vertices.len() as u32;
+            self.static_region_vertex_buffers[region_idx] =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("voxel static mesh region"),
+                        contents: bytemuck::cast_slice(&vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
+        }
     }
 
     pub fn build_dynamic_mesh(&mut self, world: &World) {
@@ -487,8 +516,17 @@ impl Renderer {
 
             pass.set_pipeline(&self.render_pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.static_vertex_buffer.slice(..));
-            pass.draw(0..self.static_vertex_count, 0..1);
+            for (buffer, count) in self
+                .static_region_vertex_buffers
+                .iter()
+                .zip(self.static_region_vertex_counts.iter())
+            {
+                if *count == 0 {
+                    continue;
+                }
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..*count, 0..1);
+            }
 
             pass.set_vertex_buffer(0, self.dynamic_vertex_buffer.slice(..));
             pass.draw(0..self.dynamic_vertex_count, 0..1);

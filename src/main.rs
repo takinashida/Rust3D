@@ -120,6 +120,7 @@ async fn run() {
 
     let mut renderer = Renderer::new(window.clone()).await;
     renderer.build_chunk_mesh(&world.chunk);
+    let _ = world.chunk.take_dirty_regions();
     renderer.build_dynamic_mesh(&world);
     renderer.update_hotbar(
         selected_hotbar,
@@ -185,7 +186,8 @@ async fn run() {
                                     camera.look_direction(),
                                     6.0,
                                 ) {
-                                    renderer.build_chunk_mesh(&world.chunk);
+                                    let dirty_regions = world.chunk.take_dirty_regions();
+                                    renderer.rebuild_chunk_regions(&world.chunk, &dirty_regions);
                                     renderer.build_dynamic_mesh(&world);
                                 }
                             }
@@ -198,7 +200,8 @@ async fn run() {
                                     6.0,
                                     block,
                                 ) {
-                                    renderer.build_chunk_mesh(&world.chunk);
+                                    let dirty_regions = world.chunk.take_dirty_regions();
+                                    renderer.rebuild_chunk_regions(&world.chunk, &dirty_regions);
                                     renderer.build_dynamic_mesh(&world);
                                 }
                             }
@@ -237,7 +240,8 @@ async fn run() {
                 let (explosives_changed, explosive_damage) =
                     world.update_explosives(camera.position, camera.eye_height);
                 if bullets_changed || explosives_changed {
-                    renderer.build_chunk_mesh(&world.chunk);
+                    let dirty_regions = world.chunk.take_dirty_regions();
+                    renderer.rebuild_chunk_regions(&world.chunk, &dirty_regions);
                 }
                 world.update_particles();
                 let (mobs_changed, damage) = world.update_mobs(camera.position);
