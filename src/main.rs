@@ -145,13 +145,8 @@ async fn run() {
                     match button {
                         MouseButton::Left => match INVENTORY[selected_hotbar] {
                             InventoryItem::Pistol => {
-                                if world.shoot_target_from_ray(
-                                    camera.position,
-                                    camera.look_direction(),
-                                    30.0,
-                                ) {
-                                    renderer.build_world_mesh(&world);
-                                }
+                                world.spawn_bullet(camera.position, camera.look_direction());
+                                renderer.build_world_mesh(&world);
                             }
                             InventoryItem::Block(_) => {
                                 if world.break_block_from_ray(
@@ -184,6 +179,11 @@ async fn run() {
         },
         Event::AboutToWait => {
             camera.update(&input, &world);
+            let had_bullets = !world.bullets.is_empty();
+            let world_changed = world.update_bullets();
+            if had_bullets || world_changed {
+                renderer.build_world_mesh(&world);
+            }
             renderer.update_camera(&camera);
             window.request_redraw();
         }

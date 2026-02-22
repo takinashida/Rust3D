@@ -327,7 +327,7 @@ impl Renderer {
     }
 
     pub fn build_world_mesh(&mut self, world: &World) {
-        let mesh = Mesh::from_chunk(&world.chunk);
+        let mesh = Mesh::from_world(world);
         self.vertex_count = mesh.vertices.len() as u32;
 
         self.vertex_buffer = self
