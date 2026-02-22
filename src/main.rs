@@ -232,15 +232,18 @@ async fn run() {
                 let had_bullets = !world.bullets.is_empty();
                 let had_particles = !world.particles.is_empty();
                 let had_explosives = !world.explosives.is_empty();
-                let bullets_changed = world.update_bullets();
-                let explosives_changed = world.update_explosives();
+                let (bullets_changed, bullet_damage) =
+                    world.update_bullets(camera.position, camera.eye_height);
+                let (explosives_changed, explosive_damage) =
+                    world.update_explosives(camera.position, camera.eye_height);
                 if bullets_changed || explosives_changed {
                     renderer.build_chunk_mesh(&world.chunk);
                 }
                 world.update_particles();
                 let (mobs_changed, damage) = world.update_mobs(camera.position);
-                if damage > 0.0 {
-                    player_health = (player_health - damage).max(0.0);
+                let total_damage = damage + bullet_damage + explosive_damage;
+                if total_damage > 0.0 {
+                    player_health = (player_health - total_damage).max(0.0);
                     renderer.update_hotbar(
                         selected_hotbar,
                         &inventory_colors(),
