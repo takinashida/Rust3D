@@ -7,7 +7,7 @@ use engine::{camera::Camera, input::InputState, renderer::Renderer};
 use world::world::World;
 
 use winit::{
-    event::{ElementState, Event, MouseButton, WindowEvent},
+    event::{DeviceEvent, ElementState, Event, MouseButton, WindowEvent},
     event_loop::EventLoop,
     keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, WindowBuilder},
@@ -68,15 +68,26 @@ async fn run() {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if button == MouseButton::Left && state == ElementState::Pressed {
-                    world.break_block(8, 8, 8);
-                    renderer.build_world_mesh(&world);
+                    let origin = camera.eye_position();
+                    let direction = camera.front();
+                    if let Some((x, y, z)) = world.raycast_first_solid(origin, direction, 6.0, 0.05)
+                    {
+                        world.break_block_i32(x, y, z);
+                        renderer.build_world_mesh(&world);
+                    }
                 }
             }
             WindowEvent::RedrawRequested => renderer.render(),
             _ => {}
         },
+        Event::DeviceEvent {
+            event: DeviceEvent::MouseMotion { delta },
+            ..
+        } => {
+            camera.process_mouse(delta.0, delta.1);
+        }
         Event::AboutToWait => {
-            camera.update(&input);
+            camera.update(&input, &world);
             renderer.update_camera(&camera);
             window.request_redraw();
         }
