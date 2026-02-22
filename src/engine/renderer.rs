@@ -346,11 +346,11 @@ impl Renderer {
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 
-    pub fn update_hotbar(&mut self, selected: usize, palette: &[[f32; 3]; 10]) {
+    pub fn update_hotbar(&mut self, selected: usize, palette: &[[f32; 3]]) {
         let width = 0.11;
         let height = 0.1;
         let gap = 0.012;
-        let total = 10.0 * width + 9.0 * gap;
+        let total = palette.len() as f32 * width + (palette.len().saturating_sub(1)) as f32 * gap;
         let start_x = -total * 0.5;
         let y = -0.92;
 

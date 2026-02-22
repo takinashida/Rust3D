@@ -63,6 +63,7 @@ impl Mesh {
                         Block::Glass => [0.6, 0.85, 0.95],
                         Block::Leaf => [0.22, 0.56, 0.18],
                         Block::Snow => [0.92, 0.94, 0.98],
+                        Block::Target => [0.9, 0.15, 0.15],
                         Block::Air => [0.0, 0.0, 0.0],
                     };
 
