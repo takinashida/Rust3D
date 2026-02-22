@@ -151,7 +151,7 @@ impl Camera {
             return;
         }
 
-        let player_radius = 0.3;
+        let player_radius = 0.5;
         let mut candidate = self.position;
 
         candidate.x += move_delta.x;
