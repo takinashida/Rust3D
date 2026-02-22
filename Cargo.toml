@@ -1,6 +1,12 @@
 [package]
-name = "Rust3D"
+name = "mini_3d_engine"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+wgpu = "0.19"
+winit = "0.29"
+cgmath = "0.18"
+bytemuck = { version = "1.14", features = ["derive"] }
+pollster = "0.3"
+noise = "0.8"
