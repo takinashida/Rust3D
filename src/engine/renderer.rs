@@ -346,7 +346,7 @@ impl Renderer {
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
 
-    pub fn update_hotbar(&mut self, selected: usize, palette: &[[f32; 3]], health: f32) {
+    pub fn update_hotbar(&mut self, selected: usize, palette: &[[f32; 3]], health: f32, fps: u32) {
         let width = 0.11;
         let height = 0.1;
         let gap = 0.012;
@@ -400,6 +400,7 @@ impl Renderer {
             by1,
             [0.82, 0.16 + 0.55 * hp, 0.16],
         );
+        draw_fps_counter(&mut vertices, fps);
 
         self.hotbar_vertex_count = vertices.len() as u32;
         self.hotbar_vertex_buffer =
@@ -565,6 +566,60 @@ fn append_rect(vertices: &mut Vec<UiVertex>, x0: f32, y0: f32, x1: f32, y1: f32,
             color,
         },
     ]);
+}
+
+fn draw_fps_counter(vertices: &mut Vec<UiVertex>, fps: u32) {
+    let clamped = fps.min(999);
+    let hundreds = (clamped / 100) % 10;
+    let tens = (clamped / 10) % 10;
+    let ones = clamped % 10;
+
+    let mut x = -0.97;
+    let y = -0.97;
+    let w = 0.034;
+    let h = 0.06;
+
+    if hundreds > 0 {
+        append_digit(vertices, hundreds as usize, x, y, w, h, [0.95, 0.95, 0.25]);
+        x += w + 0.01;
+    }
+    if hundreds > 0 || tens > 0 {
+        append_digit(vertices, tens as usize, x, y, w, h, [0.95, 0.95, 0.25]);
+        x += w + 0.01;
+    }
+    append_digit(vertices, ones as usize, x, y, w, h, [0.95, 0.95, 0.25]);
+}
+
+fn append_digit(
+    vertices: &mut Vec<UiVertex>,
+    digit: usize,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    color: [f32; 3],
+) {
+    let t = 0.008;
+    let half_h = h * 0.5;
+    let seg = [
+        [x + t, y, x + w - t, y + t],
+        [x + w - t, y + t, x + w, y + half_h - t * 0.5],
+        [x + w - t, y + half_h + t * 0.5, x + w, y + h - t],
+        [x + t, y + h - t, x + w - t, y + h],
+        [x, y + half_h + t * 0.5, x + t, y + h - t],
+        [x, y + t, x + t, y + half_h - t * 0.5],
+        [x + t, y + half_h - t * 0.5, x + w - t, y + half_h + t * 0.5],
+    ];
+    const MASKS: [u8; 10] = [
+        0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110, 0b1101101, 0b1111101, 0b0000111,
+        0b1111111, 0b1101111,
+    ];
+    let mask = MASKS[digit.min(9)];
+    for (i, r) in seg.iter().enumerate() {
+        if mask & (1 << i) != 0 {
+            append_rect(vertices, r[0], r[1], r[2], r[3], color);
+        }
+    }
 }
 
 #[repr(C)]

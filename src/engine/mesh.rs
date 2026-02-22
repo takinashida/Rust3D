@@ -1,7 +1,7 @@
 use cgmath::Point3;
 
 use crate::world::{
-    chunk::{Block, Chunk, CHUNK_SIZE},
+    chunk::{Block, Chunk, CHUNK_DEPTH, CHUNK_HEIGHT, CHUNK_WIDTH},
     world::World,
 };
 
@@ -64,6 +64,32 @@ impl Mesh {
             );
         }
 
+        for explosive in &world.explosives {
+            append_cube(
+                &mut vertices,
+                Point3::new(
+                    explosive.position.x - 0.24,
+                    explosive.position.y - 0.24,
+                    explosive.position.z - 0.24,
+                ),
+                0.48,
+                [0.1, 0.1, 0.1],
+            );
+        }
+
+        for particle in &world.particles {
+            append_cube(
+                &mut vertices,
+                Point3::new(
+                    particle.position.x - particle.size * 0.5,
+                    particle.position.y - particle.size * 0.5,
+                    particle.position.z - particle.size * 0.5,
+                ),
+                particle.size,
+                particle.color,
+            );
+        }
+
         for mob in &world.mobs {
             append_box(
                 &mut vertices,
@@ -92,9 +118,9 @@ impl Mesh {
 }
 
 fn append_chunk_mesh(vertices: &mut Vec<Vertex>, chunk: &Chunk) {
-    for x in 0..CHUNK_SIZE as i32 {
-        for y in 0..CHUNK_SIZE as i32 {
-            for z in 0..CHUNK_SIZE as i32 {
+    for x in 0..CHUNK_WIDTH as i32 {
+        for y in 0..CHUNK_HEIGHT as i32 {
+            for z in 0..CHUNK_DEPTH as i32 {
                 let block = chunk.get_i32(x, y, z);
                 if block == Block::Air {
                     continue;

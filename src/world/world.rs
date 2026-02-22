@@ -1,8 +1,8 @@
 use cgmath::{InnerSpace, Point3, Vector3};
 
-use crate::world::chunk::{Block, Chunk, CHUNK_SIZE};
+use crate::world::chunk::{Block, Chunk, CHUNK_DEPTH, CHUNK_HEIGHT, CHUNK_WIDTH};
 
-const MAX_MOBS: usize = 15;
+const MAX_MOBS: usize = 20;
 
 #[derive(Clone, Copy)]
 pub struct Bullet {
@@ -25,10 +25,29 @@ pub struct Mob {
     pub attack_cooldown: f32,
 }
 
+#[derive(Clone, Copy)]
+pub struct Particle {
+    pub position: Point3<f32>,
+    pub velocity: Vector3<f32>,
+    pub life: f32,
+    pub color: [f32; 3],
+    pub size: f32,
+}
+
+#[derive(Clone, Copy)]
+pub struct Explosive {
+    pub position: Point3<f32>,
+    pub velocity: Vector3<f32>,
+    pub timer: f32,
+    pub radius: f32,
+}
+
 pub struct World {
     pub chunk: Chunk,
     pub bullets: Vec<Bullet>,
     pub mobs: Vec<Mob>,
+    pub particles: Vec<Particle>,
+    pub explosives: Vec<Explosive>,
     spawn_timer: f32,
 }
 
@@ -40,11 +59,13 @@ impl World {
             chunk,
             bullets: Vec::new(),
             mobs: Vec::new(),
+            particles: Vec::new(),
+            explosives: Vec::new(),
             spawn_timer: 0.0,
         };
-        world.spawn_mob_at(18.5, 15.5);
-        world.spawn_mob_at(26.5, 20.5);
-        world.spawn_mob_at(34.5, 28.5);
+        world.spawn_mob_at(160.5, 140.5);
+        world.spawn_mob_at(210.5, 200.5);
+        world.spawn_mob_at(280.5, 260.5);
         world
     }
 
@@ -53,14 +74,14 @@ impl World {
             return;
         }
 
-        if let Some(ground_y) = self.highest_solid_below(x, z, CHUNK_SIZE as f32 - 1.0) {
+        if let Some(ground_y) = self.highest_solid_below(x, z, CHUNK_HEIGHT as f32 - 1.0) {
             self.mobs.push(Mob {
-                position: Point3::new(x, ground_y, z),
+                position: Point3::new(x, ground_y + 2.0, z),
                 health: 100.0,
                 radius: 0.4,
                 height: 1.8,
                 velocity_y: 0.0,
-                grounded: true,
+                grounded: false,
                 jump_cooldown: 0.0,
                 attack_cooldown: 0.0,
             });
@@ -73,18 +94,18 @@ impl World {
         }
 
         let mut preferred = [
-            (player.x + 10.0, player.z),
-            (player.x - 10.0, player.z),
-            (player.x, player.z + 10.0),
-            (player.x, player.z - 10.0),
-            (player.x + 7.5, player.z + 7.5),
+            (player.x + 22.0, player.z),
+            (player.x - 22.0, player.z),
+            (player.x, player.z + 22.0),
+            (player.x, player.z - 22.0),
+            (player.x + 16.0, player.z + 16.0),
         ];
 
         for (x, z) in &mut preferred {
-            *x = x.clamp(1.5, CHUNK_SIZE as f32 - 2.5);
-            *z = z.clamp(1.5, CHUNK_SIZE as f32 - 2.5);
+            *x = x.clamp(2.5, CHUNK_WIDTH as f32 - 2.5);
+            *z = z.clamp(2.5, CHUNK_DEPTH as f32 - 2.5);
             if self
-                .highest_solid_below(*x, *z, CHUNK_SIZE as f32 - 1.0)
+                .highest_solid_below(*x, *z, CHUNK_HEIGHT as f32 - 1.0)
                 .is_some()
             {
                 self.spawn_mob_at(*x, *z);
@@ -110,26 +131,50 @@ impl World {
         });
     }
 
+    pub fn spawn_explosive(&mut self, origin: Point3<f32>, direction: Vector3<f32>) {
+        if direction.magnitude2() <= 0.0 {
+            return;
+        }
+        let dir = direction.normalize();
+        self.explosives.push(Explosive {
+            position: origin + dir * 0.8,
+            velocity: dir * 0.34 + Vector3::new(0.0, 0.14, 0.0),
+            timer: 120.0,
+            radius: 4.5,
+        });
+    }
+
     pub fn update_bullets(&mut self) -> bool {
         let mut world_changed = false;
 
         for i in (0..self.bullets.len()).rev() {
-            let bullet = &mut self.bullets[i];
-            let previous_position = bullet.position;
-            bullet.velocity.y -= 0.002;
-            bullet.position += bullet.velocity;
-            bullet.traveled += bullet.velocity.magnitude();
+            let previous_position;
+            let bullet_position;
+            let bullet_traveled;
+            let bullet_max_distance;
+            let bullet_damage;
+            {
+                let bullet = &mut self.bullets[i];
+                previous_position = bullet.position;
+                bullet.velocity.y -= 0.002;
+                bullet.position += bullet.velocity;
+                bullet.traveled += bullet.velocity.magnitude();
+                bullet_position = bullet.position;
+                bullet_traveled = bullet.traveled;
+                bullet_max_distance = bullet.max_distance;
+                bullet_damage = bullet.damage;
+            }
 
-            let x = bullet.position.x.floor() as i32;
-            let y = bullet.position.y.floor() as i32;
-            let z = bullet.position.z.floor() as i32;
+            let x = bullet_position.x.floor() as i32;
+            let y = bullet_position.y.floor() as i32;
+            let z = bullet_position.z.floor() as i32;
 
             let hit_block = x >= 0
                 && y >= 0
                 && z >= 0
-                && x < CHUNK_SIZE as i32
-                && y < CHUNK_SIZE as i32
-                && z < CHUNK_SIZE as i32
+                && x < CHUNK_WIDTH as i32
+                && y < CHUNK_HEIGHT as i32
+                && z < CHUNK_DEPTH as i32
                 && self.chunk.get_i32(x, y, z) != Block::Air;
 
             if hit_block {
@@ -138,16 +183,28 @@ impl World {
             }
 
             let mut hit_mob = false;
+            let mut hit_particle_pos = None;
+            let mut death_particle_pos = None;
             for mob in &mut self.mobs {
-                if bullet_hits_mob(previous_position, bullet.position, mob) {
-                    mob.health -= bullet.damage;
+                if bullet_hits_mob(previous_position, bullet_position, mob) {
+                    mob.health -= bullet_damage;
                     hit_mob = true;
                     world_changed = true;
+                    hit_particle_pos = Some(bullet_position);
+                    if mob.health <= 0.0 {
+                        death_particle_pos = Some(mob.position);
+                    }
                     break;
                 }
             }
+            if let Some(pos) = hit_particle_pos {
+                self.spawn_particles(pos, 10, [1.0, 0.2, 0.2], 0.12, 30.0, 0.18);
+            }
+            if let Some(pos) = death_particle_pos {
+                self.spawn_particles(pos, 26, [1.0, 0.55, 0.15], 0.22, 55.0, 0.28);
+            }
 
-            if hit_mob || bullet.traveled >= bullet.max_distance {
+            if hit_mob || bullet_traveled >= bullet_max_distance {
                 self.bullets.swap_remove(i);
             }
         }
@@ -159,6 +216,95 @@ impl World {
         }
 
         world_changed
+    }
+
+    pub fn update_explosives(&mut self) -> bool {
+        let mut world_changed = false;
+        for i in (0..self.explosives.len()).rev() {
+            let explosive = &mut self.explosives[i];
+            explosive.velocity.y -= 0.004;
+            explosive.position += explosive.velocity;
+            explosive.timer -= 1.0;
+
+            let x = explosive.position.x.floor() as i32;
+            let y = explosive.position.y.floor() as i32;
+            let z = explosive.position.z.floor() as i32;
+
+            let hit_block = self.chunk.get_i32(x, y, z) != Block::Air;
+            if hit_block || explosive.timer <= 0.0 {
+                let pos = explosive.position;
+                let radius = explosive.radius;
+                self.explosives.swap_remove(i);
+                if self.explode_at(pos, radius) {
+                    world_changed = true;
+                }
+            }
+        }
+
+        world_changed
+    }
+
+    fn explode_at(&mut self, center: Point3<f32>, radius: f32) -> bool {
+        let mut changed = false;
+        let r2 = radius * radius;
+        let min_x = (center.x - radius).floor() as i32;
+        let max_x = (center.x + radius).ceil() as i32;
+        let min_y = (center.y - radius).floor() as i32;
+        let max_y = (center.y + radius).ceil() as i32;
+        let min_z = (center.z - radius).floor() as i32;
+        let max_z = (center.z + radius).ceil() as i32;
+
+        for x in min_x..=max_x {
+            for y in min_y..=max_y {
+                for z in min_z..=max_z {
+                    let dx = x as f32 + 0.5 - center.x;
+                    let dy = y as f32 + 0.5 - center.y;
+                    let dz = z as f32 + 0.5 - center.z;
+                    if dx * dx + dy * dy + dz * dz <= r2
+                        && self.chunk.get_i32(x, y, z) != Block::Air
+                    {
+                        self.break_block(x as usize, y as usize, z as usize);
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        self.spawn_particles(center, 45, [1.0, 0.6, 0.2], 0.36, 70.0, 0.34);
+        changed
+    }
+
+    pub fn update_particles(&mut self) {
+        for p in &mut self.particles {
+            p.velocity.y -= 0.0015;
+            p.position += p.velocity;
+            p.life -= 1.0;
+        }
+        self.particles.retain(|p| p.life > 0.0);
+    }
+
+    fn spawn_particles(
+        &mut self,
+        origin: Point3<f32>,
+        count: usize,
+        color: [f32; 3],
+        speed: f32,
+        life: f32,
+        size: f32,
+    ) {
+        for i in 0..count {
+            let a = i as f32 * 0.618_033_95;
+            let b = i as f32 * 0.414_213_57;
+            let dir = Vector3::new(a.cos() * b.sin(), (b * 1.3).cos().abs(), a.sin() * b.cos())
+                .normalize();
+            self.particles.push(Particle {
+                position: origin,
+                velocity: dir * speed,
+                life,
+                color,
+                size,
+            });
+        }
     }
 
     pub fn update_mobs(&mut self, player: Point3<f32>) -> (bool, f32) {
@@ -281,13 +427,13 @@ impl World {
     }
 
     pub fn break_block(&mut self, x: usize, y: usize, z: usize) {
-        if x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE {
+        if x < CHUNK_WIDTH && y < CHUNK_HEIGHT && z < CHUNK_DEPTH {
             self.chunk.set(x, y, z, Block::Air);
         }
     }
 
     pub fn set_block(&mut self, x: usize, y: usize, z: usize, block: Block) {
-        if x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE {
+        if x < CHUNK_WIDTH && y < CHUNK_HEIGHT && z < CHUNK_DEPTH {
             self.chunk.set(x, y, z, block);
         }
     }
@@ -316,13 +462,14 @@ impl World {
             if x >= 0
                 && y >= 0
                 && z >= 0
-                && x < CHUNK_SIZE as i32
-                && y < CHUNK_SIZE as i32
-                && z < CHUNK_SIZE as i32
+                && x < CHUNK_WIDTH as i32
+                && y < CHUNK_HEIGHT as i32
+                && z < CHUNK_DEPTH as i32
             {
                 let block = self.chunk.get_i32(x, y, z);
                 if block != Block::Air {
                     self.break_block(x as usize, y as usize, z as usize);
+                    self.spawn_particles(p, 12, [0.8, 0.75, 0.65], 0.1, 25.0, 0.12);
                     return true;
                 }
             }
@@ -363,9 +510,9 @@ impl World {
             if x < 0
                 || y < 0
                 || z < 0
-                || x >= CHUNK_SIZE as i32
-                || y >= CHUNK_SIZE as i32
-                || z >= CHUNK_SIZE as i32
+                || x >= CHUNK_WIDTH as i32
+                || y >= CHUNK_HEIGHT as i32
+                || z >= CHUNK_DEPTH as i32
             {
                 distance += step;
                 continue;
@@ -461,12 +608,12 @@ fn highest_solid_below_chunk(chunk: &Chunk, x: f32, z: f32, max_y: f32) -> Optio
     let xi = x.floor() as i32;
     let zi = z.floor() as i32;
 
-    if xi < 0 || zi < 0 || xi >= CHUNK_SIZE as i32 || zi >= CHUNK_SIZE as i32 {
+    if xi < 0 || zi < 0 || xi >= CHUNK_WIDTH as i32 || zi >= CHUNK_DEPTH as i32 {
         return None;
     }
 
     let mut y = max_y.floor() as i32;
-    y = y.min(CHUNK_SIZE as i32 - 1);
+    y = y.min(CHUNK_HEIGHT as i32 - 1);
 
     while y >= 0 {
         if chunk.get_i32(xi, y, zi) != Block::Air {
