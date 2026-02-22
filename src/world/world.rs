@@ -3,8 +3,7 @@ use cgmath::{InnerSpace, Point3, Vector3};
 use crate::world::chunk::{Block, Chunk, CHUNK_DEPTH, CHUNK_HEIGHT, CHUNK_WIDTH};
 
 const MAX_MOBS: usize = 20;
-const MAX_PARTICLES_PER_BURST: usize = 4;
-const MAX_TOTAL_PARTICLES: usize = 384;
+const MAX_TOTAL_PARTICLES: usize = 16_384;
 const PARTICLE_DIRECTIONS: [Vector3<f32>; 4] = [
     Vector3::new(0.778_673_7, 0.607_365_8, 0.157_359_87),
     Vector3::new(0.489_866_94, 0.251_622_74, 0.834_767_5),
@@ -359,7 +358,7 @@ impl World {
         }
 
         let free_slots = MAX_TOTAL_PARTICLES - self.particles.len();
-        let particle_count = count.min(MAX_PARTICLES_PER_BURST).min(free_slots);
+        let particle_count = count.min(free_slots);
         for i in 0..particle_count {
             let dir = PARTICLE_DIRECTIONS[i % PARTICLE_DIRECTIONS.len()];
             self.particles.push(Particle {
