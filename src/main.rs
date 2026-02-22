@@ -1,84 +1,107 @@
 mod engine;
 mod world;
 
-use engine::renderer::Renderer;
-use engine::camera::Camera;
-use engine::input::InputState;
+use std::sync::Arc;
 
+use engine::{camera::Camera, input::InputState, renderer::Renderer};
 use world::world::World;
 
 use winit::{
-    event::*,
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
+    event::{DeviceEvent, ElementState, Event, MouseButton, WindowEvent},
+    event_loop::EventLoop,
+    keyboard::{KeyCode, PhysicalKey},
+    window::{CursorGrabMode, WindowBuilder},
 };
 
 fn main() {
     pollster::block_on(run());
 }
 
-async fn run() {
-    // ------------------------
-    // WINDOW + EVENT LOOP
-    // ------------------------
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
-        .with_title("Voxel Game")
-        .build(&event_loop)
-        .unwrap();
+fn set_mouse_lock(window: &winit::window::Window, locked: bool) {
+    let mode = if locked {
+        CursorGrabMode::Locked
+    } else {
+        CursorGrabMode::None
+    };
 
-    // ------------------------
-    // GAME STATE
-    // ------------------------
+    if window.set_cursor_grab(mode).is_err() && locked {
+        let _ = window.set_cursor_grab(CursorGrabMode::Confined);
+    }
+
+    window.set_cursor_visible(!locked);
+}
+
+async fn run() {
+    let event_loop = EventLoop::new().expect("event loop");
+    let window = Arc::new(
+        WindowBuilder::new()
+            .with_title("Voxel Game")
+            .build(&event_loop)
+            .expect("window"),
+    );
+
     let mut world = World::new();
     let mut camera = Camera::new();
     let mut input = InputState::new();
+    let mut mouse_look_enabled = true;
 
-    let mut renderer = Renderer::new(&window).await;
+    set_mouse_lock(&window, mouse_look_enabled);
+
+    let mut renderer = Renderer::new(window.clone()).await;
     renderer.build_world_mesh(&world);
 
-    // ------------------------
-    // MAIN LOOP
-    // ------------------------
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll;
-
-        match event {
-            Event::WindowEvent { event, .. } => {
-                match event {
-                    WindowEvent::CloseRequested => {
-                        *control_flow = ControlFlow::Exit
+    let _ = event_loop.run(move |event, target| match event {
+        Event::WindowEvent { event, window_id } if window_id == window.id() => match event {
+            WindowEvent::CloseRequested => target.exit(),
+            WindowEvent::Focused(focused) => {
+                mouse_look_enabled = focused;
+                set_mouse_lock(&window, mouse_look_enabled);
+            }
+            WindowEvent::Resized(size) => {
+                renderer.resize(size);
+                camera.aspect = (size.width.max(1) as f32) / (size.height.max(1) as f32);
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let PhysicalKey::Code(KeyCode::Escape) = event.physical_key {
+                    if event.state == ElementState::Pressed {
+                        mouse_look_enabled = false;
+                        set_mouse_lock(&window, false);
                     }
-
-                    WindowEvent::KeyboardInput { input: key, .. } => {
-                        input.update(key);
+                }
+                if let PhysicalKey::Code(KeyCode::Tab) = event.physical_key {
+                    if event.state == ElementState::Pressed {
+                        mouse_look_enabled = !mouse_look_enabled;
+                        set_mouse_lock(&window, mouse_look_enabled);
                     }
-
-                    WindowEvent::MouseInput { state, button, .. } => {
-                        if button == MouseButton::Left && state == ElementState::Pressed {
-                            // Упрощённо ломаем блок перед игроком
-                            world.break_block(8, 8, 8);
-
-                            renderer.build_world_mesh(&world);
-                        }
-                    }
-
-                    _ => {}
+                }
+                input.update(&event);
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if button == MouseButton::Right && state == ElementState::Pressed {
+                    mouse_look_enabled = !mouse_look_enabled;
+                    set_mouse_lock(&window, mouse_look_enabled);
+                }
+                if button == MouseButton::Left && state == ElementState::Pressed {
+                    world.break_block(8, 8, 8);
+                    renderer.build_world_mesh(&world);
                 }
             }
-
-            Event::MainEventsCleared => {
-                camera.update(&input);
-                renderer.update_camera(&camera);
-
-                window.request_redraw();
-            }
-
-            Event::RedrawRequested(_) => {
-                renderer.render();
-            }
-
+            WindowEvent::RedrawRequested => renderer.render(),
             _ => {}
+        },
+        Event::DeviceEvent {
+            event: DeviceEvent::MouseMotion { delta },
+            ..
+        } => {
+            if mouse_look_enabled {
+                camera.process_mouse(delta.0, delta.1);
+            }
         }
+        Event::AboutToWait => {
+            camera.update(&input);
+            renderer.update_camera(&camera);
+            window.request_redraw();
+        }
+        _ => {}
     });
 }
