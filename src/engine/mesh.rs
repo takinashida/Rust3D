@@ -65,20 +65,24 @@ impl Mesh {
         }
 
         for mob in &world.mobs {
-            append_cube(
+            append_box(
                 &mut vertices,
-                mob.position,
-                0.8,
+                Point3::new(
+                    mob.position.x - mob.radius,
+                    mob.position.y,
+                    mob.position.z - mob.radius,
+                ),
+                [mob.radius * 2.0, mob.height, mob.radius * 2.0],
                 [0.8, 0.15 + (mob.health / 150.0), 0.15],
             );
             append_cube(
                 &mut vertices,
                 Point3::new(
-                    mob.position.x + 0.2,
-                    mob.position.y + 0.8,
-                    mob.position.z + 0.2,
+                    mob.position.x + mob.radius * 0.4,
+                    mob.position.y + mob.height * 0.45,
+                    mob.position.z + mob.radius * 0.4,
                 ),
-                0.2,
+                mob.radius * 0.5,
                 [0.95, 0.95, 0.95],
             );
         }
@@ -128,7 +132,16 @@ fn append_chunk_mesh(vertices: &mut Vec<Vertex>, chunk: &Chunk) {
 }
 
 fn append_cube(vertices: &mut Vec<Vertex>, origin: Point3<f32>, size: f32, color: [f32; 3]) {
-    for (normal, quad) in cube_faces(origin.x, origin.y, origin.z, size) {
+    append_box(vertices, origin, [size, size, size], color);
+}
+
+fn append_box(
+    vertices: &mut Vec<Vertex>,
+    origin: Point3<f32>,
+    size: [f32; 3],
+    color: [f32; 3],
+) {
+    for (normal, quad) in cuboid_faces(origin.x, origin.y, origin.z, size[0], size[1], size[2]) {
         push_quad(vertices, quad, color, normal);
     }
 }
@@ -170,59 +183,63 @@ fn push_quad(vertices: &mut Vec<Vertex>, quad: [[f32; 3]; 4], color: [f32; 3], n
 }
 
 fn cube_faces(x: f32, y: f32, z: f32, size: f32) -> [([i32; 3], [[f32; 3]; 4]); 6] {
+    cuboid_faces(x, y, z, size, size, size)
+}
+
+fn cuboid_faces(x: f32, y: f32, z: f32, sx: f32, sy: f32, sz: f32) -> [([i32; 3], [[f32; 3]; 4]); 6] {
     [
         (
             [0, 0, 1],
             [
-                [x, y, z + size],
-                [x + size, y, z + size],
-                [x + size, y + size, z + size],
-                [x, y + size, z + size],
+                [x, y, z + sz],
+                [x + sx, y, z + sz],
+                [x + sx, y + sy, z + sz],
+                [x, y + sy, z + sz],
             ],
         ),
         (
             [0, 0, -1],
             [
-                [x + size, y, z],
+                [x + sx, y, z],
                 [x, y, z],
-                [x, y + size, z],
-                [x + size, y + size, z],
+                [x, y + sy, z],
+                [x + sx, y + sy, z],
             ],
         ),
         (
             [1, 0, 0],
             [
-                [x + size, y, z + size],
-                [x + size, y, z],
-                [x + size, y + size, z],
-                [x + size, y + size, z + size],
+                [x + sx, y, z + sz],
+                [x + sx, y, z],
+                [x + sx, y + sy, z],
+                [x + sx, y + sy, z + sz],
             ],
         ),
         (
             [-1, 0, 0],
             [
                 [x, y, z],
-                [x, y, z + size],
-                [x, y + size, z + size],
-                [x, y + size, z],
+                [x, y, z + sz],
+                [x, y + sy, z + sz],
+                [x, y + sy, z],
             ],
         ),
         (
             [0, 1, 0],
             [
-                [x, y + size, z + size],
-                [x + size, y + size, z + size],
-                [x + size, y + size, z],
-                [x, y + size, z],
+                [x, y + sy, z + sz],
+                [x + sx, y + sy, z + sz],
+                [x + sx, y + sy, z],
+                [x, y + sy, z],
             ],
         ),
         (
             [0, -1, 0],
             [
                 [x, y, z],
-                [x + size, y, z],
-                [x + size, y, z + size],
-                [x, y, z + size],
+                [x + sx, y, z],
+                [x + sx, y, z + sz],
+                [x, y, z + sz],
             ],
         ),
     ]
