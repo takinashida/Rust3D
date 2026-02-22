@@ -94,9 +94,9 @@ async fn run() {
     let event_loop = EventLoop::new().expect("event loop");
     let window = Arc::new(
         WindowBuilder::new()
-            .with_title("Voxel Game")
+            .with_title("Zalupa game")
             .build(&event_loop)
-            .expect("window"),
+            .expect("fullscreen"),
     );
 
     let mut world = World::new();

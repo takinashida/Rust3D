@@ -103,9 +103,9 @@ impl World {
         let dir = direction.normalize();
         self.bullets.push(Bullet {
             position: origin + dir * 0.5,
-            velocity: dir * 0.9,
+            velocity: dir * 0.2,
             damage: 34.0,
-            max_distance: 35.0,
+            max_distance: 100.0,
             traveled: 0.0,
         });
     }
