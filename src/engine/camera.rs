@@ -20,6 +20,9 @@ pub struct Camera {
 }
 
 impl Camera {
+    pub const PLAYER_HEIGHT: f32 = 2.0;
+    pub const EYE_HEIGHT: f32 = 1.62;
+
     pub fn new() -> Self {
         Self {
             position: Point3::new(8.0, 10.0, 20.0),
@@ -53,6 +56,7 @@ impl Camera {
         };
         let right = planar_front.cross(Vector3::unit_y()).normalize();
 
+        let mut desired = vec3(0.0, 0.0, 0.0);
         if input.is_pressed(KeyCode::KeyW) {
             self.position += planar_front * self.speed;
         }
@@ -100,7 +104,7 @@ impl Camera {
     }
 
     pub fn view_proj_matrix(&self) -> Matrix4<f32> {
-        let view = Matrix4::look_to_rh(self.position, self.front(), Vector3::unit_y());
+        let view = Matrix4::look_to_rh(self.eye_position(), self.front(), Vector3::unit_y());
         let proj = perspective(
             Deg(self.fov_y),
             self.aspect.max(0.01),
@@ -109,15 +113,6 @@ impl Camera {
         );
 
         OPENGL_TO_WGPU_MATRIX * proj * view
-    }
-
-    fn front(&self) -> Vector3<f32> {
-        vec3(
-            self.yaw.to_radians().cos() * self.pitch.to_radians().cos(),
-            self.pitch.to_radians().sin(),
-            self.yaw.to_radians().sin() * self.pitch.to_radians().cos(),
-        )
-        .normalize()
     }
 }
 
