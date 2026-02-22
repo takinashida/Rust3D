@@ -18,12 +18,14 @@ pub struct Mob {
     pub health: f32,
     pub radius: f32,
     pub height: f32,
+    pub attack_cooldown: f32,
 }
 
 pub struct World {
     pub chunk: Chunk,
     pub bullets: Vec<Bullet>,
     pub mobs: Vec<Mob>,
+    spawn_timer: f32,
 }
 
 impl World {
@@ -34,25 +36,48 @@ impl World {
             chunk,
             bullets: Vec::new(),
             mobs: Vec::new(),
+            spawn_timer: 0.0,
         };
-        world.spawn_mobs();
+        world.spawn_mob_at(18.5, 15.5);
+        world.spawn_mob_at(26.5, 20.5);
+        world.spawn_mob_at(34.5, 28.5);
         world
     }
 
-    fn spawn_mobs(&mut self) {
-        let spawn_points = [(18.5, 15.5), (26.5, 20.5), (34.5, 28.5)];
+    fn spawn_mob_at(&mut self, x: f32, z: f32) {
+        if let Some(ground_y) = self.highest_solid_below(x, z, CHUNK_SIZE as f32 - 1.0) {
+            self.mobs.push(Mob {
+                position: Point3::new(x, ground_y, z),
+                health: 100.0,
+                radius: 0.4,
+                height: 1.8,
+                attack_cooldown: 0.0,
+            });
+        }
+    }
 
-        for (x, z) in spawn_points {
-            let base_y = self.highest_solid_below(x, z, CHUNK_SIZE as f32 - 1.0);
-            if let Some(ground_y) = base_y {
-                self.mobs.push(Mob {
-                    position: Point3::new(x, ground_y, z),
-                    health: 100.0,
-                    radius: 0.4,
-                    height: 1.8,
-                });
+    fn try_spawn_mob_near(&mut self, player: Point3<f32>) -> bool {
+        let mut preferred = [
+            (player.x + 10.0, player.z),
+            (player.x - 10.0, player.z),
+            (player.x, player.z + 10.0),
+            (player.x, player.z - 10.0),
+            (player.x + 7.5, player.z + 7.5),
+        ];
+
+        for (x, z) in &mut preferred {
+            *x = x.clamp(1.5, CHUNK_SIZE as f32 - 2.5);
+            *z = z.clamp(1.5, CHUNK_SIZE as f32 - 2.5);
+            if self
+                .highest_solid_below(*x, *z, CHUNK_SIZE as f32 - 1.0)
+                .is_some()
+            {
+                self.spawn_mob_at(*x, *z);
+                return true;
             }
         }
+
+        false
     }
 
     pub fn spawn_bullet(&mut self, origin: Point3<f32>, direction: Vector3<f32>) {
@@ -118,6 +143,60 @@ impl World {
         }
 
         world_changed
+    }
+
+    pub fn update_mobs(&mut self, player: Point3<f32>) -> (bool, f32) {
+        let mut world_changed = false;
+        let mut player_damage = 0.0;
+
+        self.spawn_timer += 1.0;
+        if self.spawn_timer >= 120.0 {
+            self.spawn_timer = 0.0;
+            if self.try_spawn_mob_near(player) {
+                world_changed = true;
+            }
+        }
+
+        for mob in &mut self.mobs {
+            let toward_player =
+                Vector3::new(player.x - mob.position.x, 0.0, player.z - mob.position.z);
+            let distance = toward_player.magnitude();
+
+            if distance > 0.01 {
+                let speed = if distance > 1.4 { 0.04 } else { 0.02 };
+                let dir = toward_player / distance;
+                mob.position.x += dir.x * speed;
+                mob.position.z += dir.z * speed;
+                if let Some(ground_y) = highest_solid_below_chunk(
+                    &self.chunk,
+                    mob.position.x,
+                    mob.position.z,
+                    CHUNK_SIZE as f32 - 1.0,
+                ) {
+                    mob.position.y = ground_y;
+                }
+                world_changed = true;
+            }
+
+            if mob.attack_cooldown > 0.0 {
+                mob.attack_cooldown -= 1.0;
+            }
+
+            let dx = player.x - mob.position.x;
+            let dz = player.z - mob.position.z;
+            let horizontal_dist_sq = dx * dx + dz * dz;
+            let vertical_close = (player.y - mob.position.y).abs() <= mob.height;
+            let touch_dist = mob.radius + 0.35;
+            if horizontal_dist_sq <= touch_dist * touch_dist
+                && vertical_close
+                && mob.attack_cooldown <= 0.0
+            {
+                player_damage += 8.0;
+                mob.attack_cooldown = 45.0;
+            }
+        }
+
+        (world_changed, player_damage)
     }
 
     pub fn break_block(&mut self, x: usize, y: usize, z: usize) {
@@ -232,24 +311,7 @@ impl World {
     }
 
     pub fn highest_solid_below(&self, x: f32, z: f32, max_y: f32) -> Option<f32> {
-        let xi = x.floor() as i32;
-        let zi = z.floor() as i32;
-
-        if xi < 0 || zi < 0 || xi >= CHUNK_SIZE as i32 || zi >= CHUNK_SIZE as i32 {
-            return None;
-        }
-
-        let mut y = max_y.floor() as i32;
-        y = y.min(CHUNK_SIZE as i32 - 1);
-
-        while y >= 0 {
-            if self.chunk.get_i32(xi, y, zi) != Block::Air {
-                return Some(y as f32 + 1.0);
-            }
-            y -= 1;
-        }
-
-        Some(0.0)
+        highest_solid_below_chunk(&self.chunk, x, z, max_y)
     }
 }
 
@@ -260,4 +322,25 @@ fn bullet_hits_mob(bullet: &Bullet, mob: &Mob) -> bool {
     let in_height =
         bullet.position.y >= mob.position.y && bullet.position.y <= mob.position.y + mob.height;
     in_radius && in_height
+}
+
+fn highest_solid_below_chunk(chunk: &Chunk, x: f32, z: f32, max_y: f32) -> Option<f32> {
+    let xi = x.floor() as i32;
+    let zi = z.floor() as i32;
+
+    if xi < 0 || zi < 0 || xi >= CHUNK_SIZE as i32 || zi >= CHUNK_SIZE as i32 {
+        return None;
+    }
+
+    let mut y = max_y.floor() as i32;
+    y = y.min(CHUNK_SIZE as i32 - 1);
+
+    while y >= 0 {
+        if chunk.get_i32(xi, y, zi) != Block::Air {
+            return Some(y as f32 + 1.0);
+        }
+        y -= 1;
+    }
+
+    Some(0.0)
 }
