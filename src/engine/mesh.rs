@@ -1,9 +1,7 @@
-use bytemuck::{Pod, Zeroable};
-
 use crate::world::chunk::{Block, Chunk, CHUNK_SIZE};
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     pub position: [f32; 3],
     pub color: [f32; 3],
@@ -55,8 +53,16 @@ impl Mesh {
                     }
 
                     let color = match block {
-                        Block::Grass => [0.2, 0.8, 0.2],
+                        Block::Grass => [0.25, 0.78, 0.22],
                         Block::Dirt => [0.55, 0.35, 0.2],
+                        Block::Stone => [0.55, 0.58, 0.62],
+                        Block::Sand => [0.88, 0.82, 0.55],
+                        Block::Wood => [0.52, 0.34, 0.19],
+                        Block::Planks => [0.72, 0.56, 0.34],
+                        Block::Bricks => [0.68, 0.27, 0.24],
+                        Block::Glass => [0.6, 0.85, 0.95],
+                        Block::Leaf => [0.22, 0.56, 0.18],
+                        Block::Snow => [0.92, 0.94, 0.98],
                         Block::Air => [0.0, 0.0, 0.0],
                     };
 
