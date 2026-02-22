@@ -1,5 +1,3 @@
-use cgmath::{InnerSpace, Point3, Vector3};
-
 use crate::world::chunk::{Block, Chunk, CHUNK_SIZE};
 
 pub struct World {
