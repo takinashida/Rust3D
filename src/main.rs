@@ -10,7 +10,7 @@ use winit::{
     event::{ElementState, Event, MouseButton, WindowEvent},
     event_loop::EventLoop,
     keyboard::{KeyCode, PhysicalKey},
-    window::WindowBuilder,
+    window::{CursorGrabMode, WindowBuilder},
 };
 
 fn main() {
@@ -45,7 +45,8 @@ async fn run() {
     let size = window.inner_size();
     camera.aspect = (size.width.max(1) as f32) / (size.height.max(1) as f32);
     let mut input = InputState::new();
-    let mut mouse_look_enabled = true;
+
+    set_mouse_lock(&window, true);
 
     let mut renderer = Renderer::new(window.clone()).await;
     renderer.build_world_mesh(&world);

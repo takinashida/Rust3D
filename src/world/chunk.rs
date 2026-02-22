@@ -55,23 +55,4 @@ impl Chunk {
             self.blocks[x][y][z] = block;
         }
     }
-
-    pub fn get_i32(&self, x: i32, y: i32, z: i32) -> Block {
-        if x < 0 || y < 0 || z < 0 {
-            return Block::Air;
-        }
-
-        let (x, y, z) = (x as usize, y as usize, z as usize);
-        if x >= CHUNK_SIZE || y >= CHUNK_SIZE || z >= CHUNK_SIZE {
-            Block::Air
-        } else {
-            self.blocks[x][y][z]
-        }
-    }
-
-    pub fn set(&mut self, x: usize, y: usize, z: usize, block: Block) {
-        if x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE {
-            self.blocks[x][y][z] = block;
-        }
-    }
 }
