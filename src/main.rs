@@ -76,7 +76,7 @@ async fn run() {
             _ => {}
         },
         Event::AboutToWait => {
-            camera.update(&input);
+            camera.update(&input, &world);
             renderer.update_camera(&camera);
             window.request_redraw();
         }
