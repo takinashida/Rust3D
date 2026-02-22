@@ -55,21 +55,24 @@ impl Camera {
         };
         let right = planar_front.cross(Vector3::unit_y()).normalize();
 
+        let mut move_delta = vec3(0.0, 0.0, 0.0);
         if input.is_pressed(KeyCode::KeyW) {
-            self.position += planar_front * self.speed;
+            move_delta += planar_front * self.speed;
         }
         if input.is_pressed(KeyCode::KeyS) {
-            self.position -= planar_front * self.speed;
+            move_delta -= planar_front * self.speed;
         }
         if input.is_pressed(KeyCode::KeyD) {
-            self.position += right * self.speed;
+            move_delta += right * self.speed;
         }
         if input.is_pressed(KeyCode::KeyA) {
-            self.position -= right * self.speed;
+            move_delta -= right * self.speed;
         }
 
-        let jump_velocity = 0.38;
-        let gravity = 0.02;
+        self.apply_horizontal_collision(move_delta, world);
+
+        let jump_velocity = 0.30;
+        let gravity = 0.012;
 
         if input.is_pressed(KeyCode::Space) && self.grounded {
             self.velocity_y = jump_velocity;
@@ -139,6 +142,51 @@ impl Camera {
 
     pub fn look_direction(&self) -> Vector3<f32> {
         self.front()
+    }
+}
+
+impl Camera {
+    fn apply_horizontal_collision(&mut self, move_delta: Vector3<f32>, world: &World) {
+        if move_delta.x == 0.0 && move_delta.z == 0.0 {
+            return;
+        }
+
+        let player_radius = 0.3;
+        let mut candidate = self.position;
+
+        candidate.x += move_delta.x;
+        if !self.collides_at(candidate, player_radius, world) {
+            self.position.x = candidate.x;
+        }
+
+        candidate = self.position;
+        candidate.z += move_delta.z;
+        if !self.collides_at(candidate, player_radius, world) {
+            self.position.z = candidate.z;
+        }
+    }
+
+    fn collides_at(&self, position: Point3<f32>, radius: f32, world: &World) -> bool {
+        let feet = position.y - self.eye_height;
+        let head = position.y - 0.1;
+        let min_x = (position.x - radius).floor() as i32;
+        let max_x = (position.x + radius).floor() as i32;
+        let min_z = (position.z - radius).floor() as i32;
+        let max_z = (position.z + radius).floor() as i32;
+        let min_y = feet.floor() as i32;
+        let max_y = head.floor() as i32;
+
+        for x in min_x..=max_x {
+            for y in min_y..=max_y {
+                for z in min_z..=max_z {
+                    if world.block_at(x, y, z) != Block::Air {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
 }
 
