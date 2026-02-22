@@ -13,6 +13,7 @@ pub enum Block {
     Glass,
     Leaf,
     Snow,
+    Target,
 }
 
 pub struct Chunk {
@@ -58,6 +59,8 @@ impl Chunk {
         self.add_tree(14, 17);
         self.add_tree(28, 12);
         self.add_tree(38, 36);
+
+        self.add_target(30, 14, 22);
     }
 
     fn add_house(&mut self, x0: usize, y0: usize, z0: usize, w: usize, h: usize, d: usize) {
@@ -120,6 +123,22 @@ impl Chunk {
                         self.blocks[lx][ly][lz] = Block::Leaf;
                     }
                 }
+            }
+        }
+    }
+
+    fn add_target(&mut self, center_x: usize, center_y: usize, center_z: usize) {
+        if center_x < 2 || center_y < 2 || center_z < 2 {
+            return;
+        }
+
+        let x0 = center_x - 2;
+        let y0 = center_y - 2;
+        let z = center_z;
+
+        for x in x0..=(center_x + 2).min(CHUNK_SIZE - 1) {
+            for y in y0..=(center_y + 2).min(CHUNK_SIZE - 1) {
+                self.blocks[x][y][z] = Block::Target;
             }
         }
     }

@@ -13,30 +13,43 @@ use winit::{
     window::{CursorGrabMode, WindowBuilder},
 };
 
-const HOTBAR_BLOCKS: [Block; 10] = [
-    Block::Grass,
-    Block::Dirt,
-    Block::Stone,
-    Block::Sand,
-    Block::Wood,
-    Block::Planks,
-    Block::Bricks,
-    Block::Glass,
-    Block::Leaf,
-    Block::Snow,
-];
+#[derive(Clone, Copy)]
+enum InventoryItem {
+    Block(Block),
+    Pistol,
+}
 
-const HOTBAR_COLORS: [[f32; 3]; 10] = [
-    [0.25, 0.78, 0.22],
-    [0.55, 0.35, 0.2],
-    [0.55, 0.58, 0.62],
-    [0.88, 0.82, 0.55],
-    [0.52, 0.34, 0.19],
-    [0.72, 0.56, 0.34],
-    [0.68, 0.27, 0.24],
-    [0.6, 0.85, 0.95],
-    [0.22, 0.56, 0.18],
-    [0.92, 0.94, 0.98],
+impl InventoryItem {
+    fn color(&self) -> [f32; 3] {
+        match self {
+            InventoryItem::Pistol => [0.15, 0.15, 0.18],
+            InventoryItem::Block(Block::Grass) => [0.25, 0.78, 0.22],
+            InventoryItem::Block(Block::Dirt) => [0.55, 0.35, 0.2],
+            InventoryItem::Block(Block::Stone) => [0.55, 0.58, 0.62],
+            InventoryItem::Block(Block::Sand) => [0.88, 0.82, 0.55],
+            InventoryItem::Block(Block::Wood) => [0.52, 0.34, 0.19],
+            InventoryItem::Block(Block::Planks) => [0.72, 0.56, 0.34],
+            InventoryItem::Block(Block::Bricks) => [0.68, 0.27, 0.24],
+            InventoryItem::Block(Block::Glass) => [0.6, 0.85, 0.95],
+            InventoryItem::Block(Block::Leaf) => [0.22, 0.56, 0.18],
+            InventoryItem::Block(Block::Snow) => [0.92, 0.94, 0.98],
+            InventoryItem::Block(Block::Target) => [0.9, 0.15, 0.15],
+            InventoryItem::Block(Block::Air) => [0.0, 0.0, 0.0],
+        }
+    }
+}
+
+const INVENTORY: [InventoryItem; 10] = [
+    InventoryItem::Pistol,
+    InventoryItem::Block(Block::Grass),
+    InventoryItem::Block(Block::Dirt),
+    InventoryItem::Block(Block::Stone),
+    InventoryItem::Block(Block::Sand),
+    InventoryItem::Block(Block::Wood),
+    InventoryItem::Block(Block::Planks),
+    InventoryItem::Block(Block::Bricks),
+    InventoryItem::Block(Block::Glass),
+    InventoryItem::Block(Block::Snow),
 ];
 
 fn main() {
@@ -73,6 +86,10 @@ fn hotbar_slot_for_key(code: KeyCode) -> Option<usize> {
     }
 }
 
+fn inventory_colors() -> [[f32; 3]; INVENTORY.len()] {
+    std::array::from_fn(|i| INVENTORY[i].color())
+}
+
 async fn run() {
     let event_loop = EventLoop::new().expect("event loop");
     let window = Arc::new(
@@ -93,7 +110,7 @@ async fn run() {
 
     let mut renderer = Renderer::new(window.clone()).await;
     renderer.build_world_mesh(&world);
-    renderer.update_hotbar(selected_hotbar, &HOTBAR_COLORS);
+    renderer.update_hotbar(selected_hotbar, &inventory_colors());
 
     let _ = event_loop.run(move |event, target| match event {
         Event::DeviceEvent {
@@ -117,7 +134,7 @@ async fn run() {
                     if event.state == ElementState::Pressed {
                         if let Some(slot) = hotbar_slot_for_key(code) {
                             selected_hotbar = slot;
-                            renderer.update_hotbar(selected_hotbar, &HOTBAR_COLORS);
+                            renderer.update_hotbar(selected_hotbar, &inventory_colors());
                         }
                     }
                 }
@@ -126,23 +143,36 @@ async fn run() {
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Pressed {
                     match button {
-                        MouseButton::Left => {
-                            if world.break_block_from_ray(
-                                camera.position,
-                                camera.look_direction(),
-                                6.0,
-                            ) {
-                                renderer.build_world_mesh(&world);
+                        MouseButton::Left => match INVENTORY[selected_hotbar] {
+                            InventoryItem::Pistol => {
+                                if world.shoot_target_from_ray(
+                                    camera.position,
+                                    camera.look_direction(),
+                                    30.0,
+                                ) {
+                                    renderer.build_world_mesh(&world);
+                                }
                             }
-                        }
+                            InventoryItem::Block(_) => {
+                                if world.break_block_from_ray(
+                                    camera.position,
+                                    camera.look_direction(),
+                                    6.0,
+                                ) {
+                                    renderer.build_world_mesh(&world);
+                                }
+                            }
+                        },
                         MouseButton::Right => {
-                            if world.place_block_from_ray(
-                                camera.position,
-                                camera.look_direction(),
-                                6.0,
-                                HOTBAR_BLOCKS[selected_hotbar],
-                            ) {
-                                renderer.build_world_mesh(&world);
+                            if let InventoryItem::Block(block) = INVENTORY[selected_hotbar] {
+                                if world.place_block_from_ray(
+                                    camera.position,
+                                    camera.look_direction(),
+                                    6.0,
+                                    block,
+                                ) {
+                                    renderer.build_world_mesh(&world);
+                                }
                             }
                         }
                         _ => {}
