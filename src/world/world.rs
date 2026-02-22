@@ -140,7 +140,7 @@ impl World {
             position: origin + dir * 0.8,
             velocity: dir * 0.34 + Vector3::new(0.0, 0.14, 0.0),
             timer: 120.0,
-            radius: 4.5,
+            radius: 30.0,
         });
     }
 
