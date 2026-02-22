@@ -44,23 +44,6 @@ impl Camera {
         self.pitch = (self.pitch - delta_y as f32 * self.mouse_sensitivity).clamp(-89.0, 89.0);
     }
 
-    pub fn eye_position(&self) -> Point3<f32> {
-        Point3::new(
-            self.position.x,
-            self.position.y + Self::EYE_HEIGHT,
-            self.position.z,
-        )
-    }
-
-    pub fn front(&self) -> Vector3<f32> {
-        vec3(
-            self.yaw.to_radians().cos() * self.pitch.to_radians().cos(),
-            self.pitch.to_radians().sin(),
-            self.yaw.to_radians().sin() * self.pitch.to_radians().cos(),
-        )
-        .normalize()
-    }
-
     pub fn update(&mut self, input: &InputState, world: &World) {
         let front = self.front();
         let planar_front = {
@@ -75,40 +58,16 @@ impl Camera {
 
         let mut desired = vec3(0.0, 0.0, 0.0);
         if input.is_pressed(KeyCode::KeyW) {
-            desired += planar_front;
+            self.position += planar_front * self.speed;
         }
         if input.is_pressed(KeyCode::KeyS) {
-            desired -= planar_front;
+            self.position -= planar_front * self.speed;
         }
         if input.is_pressed(KeyCode::KeyA) {
-            desired += right;
+            self.position += right * self.speed;
         }
         if input.is_pressed(KeyCode::KeyD) {
-            desired -= right;
-        }
-
-        if desired.magnitude2() > 0.0 {
-            let movement = desired.normalize() * self.speed;
-
-            let target_x = self.position.x + movement.x;
-            if world.is_walkable_at(
-                target_x,
-                self.position.y,
-                self.position.z,
-                Self::PLAYER_HEIGHT,
-            ) {
-                self.position.x = target_x;
-            }
-
-            let target_z = self.position.z + movement.z;
-            if world.is_walkable_at(
-                self.position.x,
-                self.position.y,
-                target_z,
-                Self::PLAYER_HEIGHT,
-            ) {
-                self.position.z = target_z;
-            }
+            self.position -= right * self.speed;
         }
 
         let jump_velocity = 0.35;
@@ -120,17 +79,6 @@ impl Camera {
         }
 
         self.velocity_y -= gravity;
-
-        if self.velocity_y > 0.0 {
-            let next_top = self.position.y + Self::PLAYER_HEIGHT + self.velocity_y;
-            let head_block = next_top.floor() as i32;
-            let bx = self.position.x.floor() as i32;
-            let bz = self.position.z.floor() as i32;
-            if world.is_solid_at(bx, head_block, bz) {
-                self.velocity_y = 0.0;
-            }
-        }
-
         self.position.y += self.velocity_y;
 
         if let Some(surface_height) = world.surface_height(self.position.x, self.position.z) {
