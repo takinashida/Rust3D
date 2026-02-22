@@ -17,6 +17,7 @@ pub struct Camera {
     pub mouse_sensitivity: f32,
     pub velocity_y: f32,
     pub grounded: bool,
+    pub eye_height: f32,
 }
 
 impl Camera {
@@ -33,6 +34,7 @@ impl Camera {
             mouse_sensitivity: 0.2,
             velocity_y: 0.0,
             grounded: false,
+            eye_height: 2.0,
         }
     }
 
@@ -78,8 +80,9 @@ impl Camera {
         self.position.y += self.velocity_y;
 
         if let Some(surface_height) = world.surface_height(self.position.x, self.position.z) {
-            if self.position.y <= surface_height {
-                self.position.y = surface_height;
+            let feet_y = self.position.y - self.eye_height;
+            if feet_y <= surface_height {
+                self.position.y = surface_height + self.eye_height;
                 self.velocity_y = 0.0;
                 self.grounded = true;
             }
@@ -118,6 +121,10 @@ impl Camera {
             self.yaw.to_radians().sin() * self.pitch.to_radians().cos(),
         )
         .normalize()
+    }
+
+    pub fn look_direction(&self) -> Vector3<f32> {
+        self.front()
     }
 }
 
