@@ -7,10 +7,10 @@ use engine::{camera::Camera, input::InputState, renderer::Renderer};
 use world::world::World;
 
 use winit::{
-    event::{DeviceEvent, ElementState, Event, MouseButton, WindowEvent},
+    event::{ElementState, Event, MouseButton, WindowEvent},
     event_loop::EventLoop,
     keyboard::{KeyCode, PhysicalKey},
-    window::{CursorGrabMode, WindowBuilder},
+    window::WindowBuilder,
 };
 
 fn main() {
@@ -45,18 +45,12 @@ async fn run() {
     let mut input = InputState::new();
     let mut mouse_look_enabled = true;
 
-    set_mouse_lock(&window, mouse_look_enabled);
-
     let mut renderer = Renderer::new(window.clone()).await;
     renderer.build_world_mesh(&world);
 
     let _ = event_loop.run(move |event, target| match event {
         Event::WindowEvent { event, window_id } if window_id == window.id() => match event {
             WindowEvent::CloseRequested => target.exit(),
-            WindowEvent::Focused(focused) => {
-                mouse_look_enabled = focused;
-                set_mouse_lock(&window, mouse_look_enabled);
-            }
             WindowEvent::Resized(size) => {
                 renderer.resize(size);
                 camera.aspect = (size.width.max(1) as f32) / (size.height.max(1) as f32);
@@ -64,23 +58,12 @@ async fn run() {
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(KeyCode::Escape) = event.physical_key {
                     if event.state == ElementState::Pressed {
-                        mouse_look_enabled = false;
-                        set_mouse_lock(&window, false);
-                    }
-                }
-                if let PhysicalKey::Code(KeyCode::Tab) = event.physical_key {
-                    if event.state == ElementState::Pressed {
-                        mouse_look_enabled = !mouse_look_enabled;
-                        set_mouse_lock(&window, mouse_look_enabled);
+                        target.exit();
                     }
                 }
                 input.update(&event);
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if button == MouseButton::Right && state == ElementState::Pressed {
-                    mouse_look_enabled = !mouse_look_enabled;
-                    set_mouse_lock(&window, mouse_look_enabled);
-                }
                 if button == MouseButton::Left && state == ElementState::Pressed {
                     world.break_block(8, 8, 8);
                     renderer.build_world_mesh(&world);
@@ -89,14 +72,6 @@ async fn run() {
             WindowEvent::RedrawRequested => renderer.render(),
             _ => {}
         },
-        Event::DeviceEvent {
-            event: DeviceEvent::MouseMotion { delta },
-            ..
-        } => {
-            if mouse_look_enabled {
-                camera.process_mouse(delta.0, delta.1);
-            }
-        }
         Event::AboutToWait => {
             camera.update(&input);
             renderer.update_camera(&camera);
