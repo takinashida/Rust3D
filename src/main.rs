@@ -106,6 +106,7 @@ async fn run() {
     let mut input = InputState::new();
     let mut selected_hotbar = 0usize;
     let mut player_health = 100.0f32;
+    let mut game_over = false;
 
     set_mouse_lock(&window, true);
 
@@ -146,6 +147,10 @@ async fn run() {
                 input.update(&event);
             }
             WindowEvent::MouseInput { state, button, .. } => {
+                if game_over {
+                    return;
+                }
+
                 if state == ElementState::Pressed {
                     match button {
                         MouseButton::Left => match INVENTORY[selected_hotbar] {
@@ -183,18 +188,28 @@ async fn run() {
             _ => {}
         },
         Event::AboutToWait => {
-            camera.update(&input, &world);
-            let had_bullets = !world.bullets.is_empty();
-            let bullets_changed = world.update_bullets();
-            let (mobs_changed, damage) = world.update_mobs(camera.position);
-            if damage > 0.0 {
-                player_health = (player_health - damage).max(0.0);
-                renderer.update_hotbar(selected_hotbar, &inventory_colors(), player_health / 100.0);
+            if !game_over {
+                camera.update(&input, &world);
+                let had_bullets = !world.bullets.is_empty();
+                let bullets_changed = world.update_bullets();
+                let (mobs_changed, damage) = world.update_mobs(camera.position);
+                if damage > 0.0 {
+                    player_health = (player_health - damage).max(0.0);
+                    renderer.update_hotbar(
+                        selected_hotbar,
+                        &inventory_colors(),
+                        player_health / 100.0,
+                    );
+                    if player_health <= 0.0 {
+                        game_over = true;
+                        window.set_title("Voxel Game - GAME OVER");
+                    }
+                }
+                if had_bullets || bullets_changed || mobs_changed {
+                    renderer.build_world_mesh(&world);
+                }
+                renderer.update_camera(&camera);
             }
-            if had_bullets || bullets_changed || mobs_changed {
-                renderer.build_world_mesh(&world);
-            }
-            renderer.update_camera(&camera);
             window.request_redraw();
         }
         _ => {}
