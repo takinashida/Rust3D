@@ -3,6 +3,7 @@ use cgmath::{InnerSpace, Point3, Vector3};
 use crate::world::chunk::{Block, Chunk, CHUNK_DEPTH, CHUNK_HEIGHT, CHUNK_WIDTH};
 
 const MAX_MOBS: usize = 20;
+const MAX_PARTICLES_PER_BURST: usize = 4;
 
 #[derive(Clone, Copy)]
 pub struct Bullet {
@@ -144,8 +145,9 @@ impl World {
         });
     }
 
-    pub fn update_bullets(&mut self) -> bool {
+    pub fn update_bullets(&mut self, player: Point3<f32>, player_eye_height: f32) -> (bool, f32) {
         let mut world_changed = false;
+        let mut player_damage = 0.0;
 
         for i in (0..self.bullets.len()).rev() {
             let previous_position;
@@ -183,6 +185,7 @@ impl World {
             }
 
             let mut hit_mob = false;
+            let mut hit_player = false;
             let mut hit_particle_pos = None;
             let mut death_particle_pos = None;
             for mob in &mut self.mobs {
@@ -197,6 +200,20 @@ impl World {
                     break;
                 }
             }
+
+            if !hit_mob
+                && bullet_hits_player(
+                    previous_position,
+                    bullet_position,
+                    player,
+                    player_eye_height,
+                )
+            {
+                hit_player = true;
+                player_damage += bullet_damage;
+                hit_particle_pos = Some(bullet_position);
+            }
+
             if let Some(pos) = hit_particle_pos {
                 self.spawn_particles(pos, 10, [1.0, 0.2, 0.2], 0.12, 30.0, 0.18);
             }
@@ -204,7 +221,7 @@ impl World {
                 self.spawn_particles(pos, 26, [1.0, 0.55, 0.15], 0.22, 55.0, 0.28);
             }
 
-            if hit_mob || bullet_traveled >= bullet_max_distance {
+            if hit_mob || hit_player || bullet_traveled >= bullet_max_distance {
                 self.bullets.swap_remove(i);
             }
         }
@@ -215,11 +232,16 @@ impl World {
             world_changed = true;
         }
 
-        world_changed
+        (world_changed, player_damage)
     }
 
-    pub fn update_explosives(&mut self) -> bool {
+    pub fn update_explosives(
+        &mut self,
+        player: Point3<f32>,
+        player_eye_height: f32,
+    ) -> (bool, f32) {
         let mut world_changed = false;
+        let mut player_damage = 0.0;
         for i in (0..self.explosives.len()).rev() {
             let explosive = &mut self.explosives[i];
             explosive.velocity.y -= 0.004;
@@ -235,17 +257,27 @@ impl World {
                 let pos = explosive.position;
                 let radius = explosive.radius;
                 self.explosives.swap_remove(i);
-                if self.explode_at(pos, radius) {
+                let (explosion_changed, damage) =
+                    self.explode_at(pos, radius, player, player_eye_height);
+                player_damage += damage;
+                if explosion_changed {
                     world_changed = true;
                 }
             }
         }
 
-        world_changed
+        (world_changed, player_damage)
     }
 
-    fn explode_at(&mut self, center: Point3<f32>, radius: f32) -> bool {
+    fn explode_at(
+        &mut self,
+        center: Point3<f32>,
+        radius: f32,
+        player: Point3<f32>,
+        player_eye_height: f32,
+    ) -> (bool, f32) {
         let mut changed = false;
+        let mut player_damage = 0.0;
         let r2 = radius * radius;
         let min_x = (center.x - radius).floor() as i32;
         let max_x = (center.x + radius).ceil() as i32;
@@ -270,8 +302,31 @@ impl World {
             }
         }
 
+        let mob_base_damage = 120.0;
+        for mob in &mut self.mobs {
+            let mob_center = Point3::new(
+                mob.position.x,
+                mob.position.y + mob.height * 0.5,
+                mob.position.z,
+            );
+            let distance = (mob_center - center).magnitude();
+            if distance <= radius {
+                let falloff = 1.0 - distance / radius;
+                let damage = mob_base_damage * falloff;
+                mob.health -= damage;
+                changed = true;
+            }
+        }
+
+        let player_center = Point3::new(player.x, player.y - player_eye_height * 0.5, player.z);
+        let player_distance = (player_center - center).magnitude();
+        if player_distance <= radius {
+            let falloff = 1.0 - player_distance / radius;
+            player_damage = 100.0 * falloff;
+        }
+
         self.spawn_particles(center, 45, [1.0, 0.6, 0.2], 0.36, 70.0, 0.34);
-        changed
+        (changed, player_damage)
     }
 
     pub fn update_particles(&mut self) {
@@ -292,7 +347,8 @@ impl World {
         life: f32,
         size: f32,
     ) {
-        for i in 0..count {
+        let particle_count = count.min(MAX_PARTICLES_PER_BURST);
+        for i in 0..particle_count {
             let a = i as f32 * 0.618_033_95;
             let b = i as f32 * 0.414_213_57;
             let dir = Vector3::new(a.cos() * b.sin(), (b * 1.3).cos().abs(), a.sin() * b.cos())
@@ -566,6 +622,39 @@ fn bullet_hits_mob(start: Point3<f32>, end: Point3<f32>, mob: &Mob) -> bool {
     let mob_min_y = mob.position.y;
     let mob_max_y = mob.position.y + mob.height;
     let in_height = seg_max_y >= mob_min_y && seg_min_y <= mob_max_y;
+
+    in_radius && in_height
+}
+
+fn bullet_hits_player(
+    start: Point3<f32>,
+    end: Point3<f32>,
+    player: Point3<f32>,
+    player_eye_height: f32,
+) -> bool {
+    let radius = 0.3;
+    let seg_dx = end.x - start.x;
+    let seg_dz = end.z - start.z;
+    let seg_len_sq = seg_dx * seg_dx + seg_dz * seg_dz;
+
+    let t = if seg_len_sq > 0.0001 {
+        ((player.x - start.x) * seg_dx + (player.z - start.z) * seg_dz) / seg_len_sq
+    } else {
+        0.0
+    }
+    .clamp(0.0, 1.0);
+
+    let closest_x = start.x + seg_dx * t;
+    let closest_z = start.z + seg_dz * t;
+    let dx = closest_x - player.x;
+    let dz = closest_z - player.z;
+    let in_radius = dx * dx + dz * dz <= radius * radius;
+
+    let seg_min_y = start.y.min(end.y);
+    let seg_max_y = start.y.max(end.y);
+    let player_min_y = player.y - player_eye_height;
+    let player_max_y = player.y;
+    let in_height = seg_max_y >= player_min_y && seg_min_y <= player_max_y;
 
     in_radius && in_height
 }
