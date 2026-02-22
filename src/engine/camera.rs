@@ -22,15 +22,15 @@ pub struct Camera {
 impl Camera {
     pub fn new() -> Self {
         Self {
-            position: Point3::new(8.0, 10.0, 20.0),
+            position: Point3::new(8.0, 10.0, 10.0),
             yaw: -90.0,
             pitch: -15.0,
             aspect: 16.0 / 9.0,
             fov_y: 60.0,
             z_near: 0.1,
             z_far: 200.0,
-            speed: 0.25,
-            mouse_sensitivity: 0.1,
+            speed: 0.05,
+            mouse_sensitivity: 0.2,
             velocity_y: 0.0,
             grounded: false,
         }
@@ -59,10 +59,10 @@ impl Camera {
         if input.is_pressed(KeyCode::KeyS) {
             self.position -= planar_front * self.speed;
         }
-        if input.is_pressed(KeyCode::KeyA) {
+        if input.is_pressed(KeyCode::KeyD) {
             self.position += right * self.speed;
         }
-        if input.is_pressed(KeyCode::KeyD) {
+        if input.is_pressed(KeyCode::KeyA) {
             self.position -= right * self.speed;
         }
 
