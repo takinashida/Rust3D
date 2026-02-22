@@ -17,6 +17,7 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     size: PhysicalSize<u32>,
     render_pipeline: wgpu::RenderPipeline,
+    crosshair_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     vertex_count: u32,
     camera_buffer: wgpu::Buffer,
@@ -147,6 +148,43 @@ impl Renderer {
             multiview: None,
         });
 
+        let crosshair_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("crosshair shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/crosshair.wgsl").into()),
+        });
+
+        let crosshair_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("crosshair pipeline layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+
+        let crosshair_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("crosshair pipeline"),
+            layout: Some(&crosshair_layout),
+            vertex: wgpu::VertexState {
+                module: &crosshair_shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &crosshair_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
         let depth_texture = DepthTexture::new(&device, &config, "depth texture");
 
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -163,6 +201,7 @@ impl Renderer {
             config,
             size,
             render_pipeline,
+            crosshair_pipeline,
             vertex_buffer,
             vertex_count: 0,
             camera_buffer,
@@ -258,6 +297,9 @@ impl Renderer {
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             pass.draw(0..self.vertex_count, 0..1);
+
+            pass.set_pipeline(&self.crosshair_pipeline);
+            pass.draw(0..4, 0..1);
         }
 
         self.queue.submit(Some(encoder.finish()));
