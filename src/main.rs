@@ -42,6 +42,8 @@ async fn run() {
 
     let mut world = World::new();
     let mut camera = Camera::new();
+    let size = window.inner_size();
+    camera.aspect = (size.width.max(1) as f32) / (size.height.max(1) as f32);
     let mut input = InputState::new();
     let mut mouse_look_enabled = true;
 
