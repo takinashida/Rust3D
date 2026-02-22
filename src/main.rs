@@ -17,6 +17,20 @@ fn main() {
     pollster::block_on(run());
 }
 
+fn set_mouse_lock(window: &winit::window::Window, locked: bool) {
+    let mode = if locked {
+        CursorGrabMode::Locked
+    } else {
+        CursorGrabMode::None
+    };
+
+    if window.set_cursor_grab(mode).is_err() && locked {
+        let _ = window.set_cursor_grab(CursorGrabMode::Confined);
+    }
+
+    window.set_cursor_visible(!locked);
+}
+
 async fn run() {
     let event_loop = EventLoop::new().expect("event loop");
     let window = Arc::new(
@@ -29,6 +43,7 @@ async fn run() {
     let mut world = World::new();
     let mut camera = Camera::new();
     let mut input = InputState::new();
+    let mut mouse_look_enabled = true;
 
     let mut renderer = Renderer::new(window.clone()).await;
     renderer.build_world_mesh(&world);

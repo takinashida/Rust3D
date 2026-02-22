@@ -26,6 +26,17 @@ impl Camera {
             z_far: 200.0,
             speed: 0.25,
         }
+        if input.is_pressed(KeyCode::Space) {
+            self.position.y += self.speed;
+        }
+        if input.is_pressed(KeyCode::ShiftLeft) {
+            self.position.y -= self.speed;
+        }
+    }
+
+    pub fn process_mouse(&mut self, delta_x: f64, delta_y: f64) {
+        self.yaw += delta_x as f32 * self.mouse_sensitivity;
+        self.pitch = (self.pitch - delta_y as f32 * self.mouse_sensitivity).clamp(-89.0, 89.0);
     }
 
     pub fn update(&mut self, input: &InputState) {
