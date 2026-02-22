@@ -17,7 +17,6 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     size: PhysicalSize<u32>,
     render_pipeline: wgpu::RenderPipeline,
-    depth_texture_view: wgpu::TextureView,
     vertex_buffer: wgpu::Buffer,
     vertex_count: u32,
     camera_buffer: wgpu::Buffer,
@@ -71,7 +70,6 @@ impl Renderer {
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
-        let depth_texture_view = create_depth_texture_view(&device, &config);
 
         let camera_uniform = CameraUniform::new();
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -137,13 +135,7 @@ impl Renderer {
                 front_face: wgpu::FrontFace::Ccw,
                 ..Default::default()
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth24Plus,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
+            depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -162,7 +154,6 @@ impl Renderer {
             config,
             size,
             render_pipeline,
-            depth_texture_view,
             vertex_buffer,
             vertex_count: 0,
             camera_buffer,
@@ -179,7 +170,6 @@ impl Renderer {
         self.config.width = new_size.width;
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);
-        self.depth_texture_view = create_depth_texture_view(&self.device, &self.config);
     }
 
     pub fn build_world_mesh(&mut self, world: &World) {
@@ -207,7 +197,6 @@ impl Renderer {
             Ok(frame) => frame,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 self.surface.configure(&self.device, &self.config);
-                self.depth_texture_view = create_depth_texture_view(&self.device, &self.config);
                 return;
             }
             Err(wgpu::SurfaceError::OutOfMemory) => {
@@ -242,14 +231,7 @@ impl Renderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_texture_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
+                depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
@@ -263,28 +245,6 @@ impl Renderer {
         self.queue.submit(Some(encoder.finish()));
         frame.present();
     }
-}
-
-fn create_depth_texture_view(
-    device: &wgpu::Device,
-    config: &wgpu::SurfaceConfiguration,
-) -> wgpu::TextureView {
-    let depth = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("depth texture"),
-        size: wgpu::Extent3d {
-            width: config.width,
-            height: config.height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Depth24Plus,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-
-    depth.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 #[repr(C)]

@@ -31,8 +31,4 @@ impl InputState {
     pub fn is_pressed(&self, code: KeyCode) -> bool {
         self.pressed.contains(&code)
     }
-
-    pub fn clear(&mut self) {
-        self.pressed.clear();
-    }
 }
