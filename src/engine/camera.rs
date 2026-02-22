@@ -23,13 +23,13 @@ pub struct Camera {
 impl Camera {
     pub fn new() -> Self {
         Self {
-            position: Point3::new(8.0, 16.0, 10.0),
+            position: Point3::new(256.0, 36.0, 256.0),
             yaw: -90.0,
             pitch: -15.0,
             aspect: 16.0 / 9.0,
             fov_y: 60.0,
             z_near: 0.1,
-            z_far: 300.0,
+            z_far: 900.0,
             speed: 0.08,
             mouse_sensitivity: 0.2,
             velocity_y: 0.0,

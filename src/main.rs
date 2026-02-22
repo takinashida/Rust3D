@@ -1,14 +1,17 @@
 mod engine;
 mod world;
 
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use engine::{camera::Camera, input::InputState, renderer::Renderer};
 use world::{chunk::Block, world::World};
 
 use winit::{
     event::{DeviceEvent, ElementState, Event, MouseButton, WindowEvent},
-    event_loop::EventLoop,
+    event_loop::{ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, WindowBuilder},
 };
@@ -17,12 +20,14 @@ use winit::{
 enum InventoryItem {
     Block(Block),
     Pistol,
+    Explosive,
 }
 
 impl InventoryItem {
     fn color(&self) -> [f32; 3] {
         match self {
             InventoryItem::Pistol => [0.15, 0.15, 0.18],
+            InventoryItem::Explosive => [0.08, 0.08, 0.08],
             InventoryItem::Block(Block::Grass) => [0.25, 0.78, 0.22],
             InventoryItem::Block(Block::Dirt) => [0.55, 0.35, 0.2],
             InventoryItem::Block(Block::Stone) => [0.55, 0.58, 0.62],
@@ -41,6 +46,7 @@ impl InventoryItem {
 
 const INVENTORY: [InventoryItem; 10] = [
     InventoryItem::Pistol,
+    InventoryItem::Explosive,
     InventoryItem::Block(Block::Grass),
     InventoryItem::Block(Block::Dirt),
     InventoryItem::Block(Block::Stone),
@@ -49,7 +55,6 @@ const INVENTORY: [InventoryItem; 10] = [
     InventoryItem::Block(Block::Planks),
     InventoryItem::Block(Block::Bricks),
     InventoryItem::Block(Block::Glass),
-    InventoryItem::Block(Block::Snow),
 ];
 
 fn main() {
@@ -107,12 +112,22 @@ async fn run() {
     let mut selected_hotbar = 0usize;
     let mut player_health = 100.0f32;
     let mut game_over = false;
+    let mut fps_display = 60u32;
+    let mut fps_counter = 0u32;
+    let mut fps_last_sample = Instant::now();
 
     set_mouse_lock(&window, true);
 
     let mut renderer = Renderer::new(window.clone()).await;
     renderer.build_world_mesh(&world);
-    renderer.update_hotbar(selected_hotbar, &inventory_colors(), player_health / 100.0);
+    renderer.update_hotbar(
+        selected_hotbar,
+        &inventory_colors(),
+        player_health / 100.0,
+        fps_display,
+    );
+
+    let frame_time = Duration::from_millis(16);
 
     let _ = event_loop.run(move |event, target| match event {
         Event::DeviceEvent {
@@ -140,6 +155,7 @@ async fn run() {
                                 selected_hotbar,
                                 &inventory_colors(),
                                 player_health / 100.0,
+                                fps_display,
                             );
                         }
                     }
@@ -156,6 +172,10 @@ async fn run() {
                         MouseButton::Left => match INVENTORY[selected_hotbar] {
                             InventoryItem::Pistol => {
                                 world.spawn_bullet(camera.position, camera.look_direction());
+                                renderer.build_world_mesh(&world);
+                            }
+                            InventoryItem::Explosive => {
+                                world.spawn_explosive(camera.position, camera.look_direction());
                                 renderer.build_world_mesh(&world);
                             }
                             InventoryItem::Block(_) => {
@@ -184,14 +204,34 @@ async fn run() {
                     }
                 }
             }
-            WindowEvent::RedrawRequested => renderer.render(),
+            WindowEvent::RedrawRequested => {
+                renderer.render();
+                fps_counter += 1;
+                if fps_last_sample.elapsed() >= Duration::from_secs(1) {
+                    fps_display = fps_counter;
+                    fps_counter = 0;
+                    fps_last_sample = Instant::now();
+                    renderer.update_hotbar(
+                        selected_hotbar,
+                        &inventory_colors(),
+                        player_health / 100.0,
+                        fps_display,
+                    );
+                }
+            }
             _ => {}
         },
         Event::AboutToWait => {
+            target.set_control_flow(ControlFlow::WaitUntil(Instant::now() + frame_time));
+
             if !game_over {
                 camera.update(&input, &world);
                 let had_bullets = !world.bullets.is_empty();
+                let had_particles = !world.particles.is_empty();
+                let had_explosives = !world.explosives.is_empty();
                 let bullets_changed = world.update_bullets();
+                let explosives_changed = world.update_explosives();
+                world.update_particles();
                 let (mobs_changed, damage) = world.update_mobs(camera.position);
                 if damage > 0.0 {
                     player_health = (player_health - damage).max(0.0);
@@ -199,13 +239,21 @@ async fn run() {
                         selected_hotbar,
                         &inventory_colors(),
                         player_health / 100.0,
+                        fps_display,
                     );
                     if player_health <= 0.0 {
                         game_over = true;
                         window.set_title("Voxel Game - GAME OVER");
                     }
                 }
-                if had_bullets || bullets_changed || mobs_changed {
+                if had_bullets
+                    || bullets_changed
+                    || mobs_changed
+                    || had_particles
+                    || had_explosives
+                    || explosives_changed
+                    || !world.particles.is_empty()
+                {
                     renderer.build_world_mesh(&world);
                 }
                 renderer.update_camera(&camera);
