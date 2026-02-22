@@ -170,11 +170,15 @@ impl Camera {
         let feet = position.y - self.eye_height;
         let head = position.y - 0.1;
         let skin = 0.02;
+        // Avoid side-colliding with the top face of a block when stepping/falling off an edge.
+        // Keeping a slightly thicker clearance near the feet prevents the player from
+        // "sticking" while dropping down from higher blocks.
+        let feet_clearance = 0.12;
         let min_x = (position.x - radius).floor() as i32;
         let max_x = (position.x + radius).floor() as i32;
         let min_z = (position.z - radius).floor() as i32;
         let max_z = (position.z + radius).floor() as i32;
-        let min_y = (feet + skin).floor() as i32;
+        let min_y = (feet + feet_clearance).floor() as i32;
         let max_y = (head - skin).floor() as i32;
 
         if min_y > max_y {
