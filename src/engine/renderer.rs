@@ -5,7 +5,7 @@ use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{
     engine::mesh::{Mesh, Vertex},
-    world::world::World,
+    world::{chunk::Chunk, world::World},
 };
 
 use super::camera::Camera;
@@ -20,8 +20,10 @@ pub struct Renderer {
     sky_pipeline: wgpu::RenderPipeline,
     crosshair_pipeline: wgpu::RenderPipeline,
     hotbar_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    vertex_count: u32,
+    static_vertex_buffer: wgpu::Buffer,
+    static_vertex_count: u32,
+    dynamic_vertex_buffer: wgpu::Buffer,
+    dynamic_vertex_count: u32,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     hotbar_vertex_buffer: wgpu::Buffer,
@@ -287,8 +289,15 @@ impl Renderer {
 
         let depth_texture = DepthTexture::new(&device, &config, "depth texture");
 
-        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("empty vertices"),
+        let static_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("empty static vertices"),
+            size: 4,
+            usage: wgpu::BufferUsages::VERTEX,
+            mapped_at_creation: false,
+        });
+
+        let dynamic_vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("empty dynamic vertices"),
             size: 4,
             usage: wgpu::BufferUsages::VERTEX,
             mapped_at_creation: false,
@@ -304,8 +313,10 @@ impl Renderer {
             sky_pipeline,
             crosshair_pipeline,
             hotbar_pipeline,
-            vertex_buffer,
-            vertex_count: 0,
+            static_vertex_buffer,
+            static_vertex_count: 0,
+            dynamic_vertex_buffer,
+            dynamic_vertex_count: 0,
             camera_buffer,
             camera_bind_group,
             hotbar_vertex_buffer,
@@ -326,17 +337,30 @@ impl Renderer {
         self.depth_texture = DepthTexture::new(&self.device, &self.config, "depth texture");
     }
 
-    pub fn build_world_mesh(&mut self, world: &World) {
-        let mesh = Mesh::from_world(world);
-        self.vertex_count = mesh.vertices.len() as u32;
+    pub fn build_chunk_mesh(&mut self, chunk: &Chunk) {
+        let mesh = Mesh::from_chunk(chunk);
+        self.static_vertex_count = mesh.vertices.len() as u32;
 
-        self.vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("voxel mesh"),
-                contents: bytemuck::cast_slice(&mesh.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        self.static_vertex_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("voxel static mesh"),
+                    contents: bytemuck::cast_slice(&mesh.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+    }
+
+    pub fn build_dynamic_mesh(&mut self, world: &World) {
+        let mesh = Mesh::dynamic_from_world(world);
+        self.dynamic_vertex_count = mesh.vertices.len() as u32;
+
+        self.dynamic_vertex_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("voxel dynamic mesh"),
+                    contents: bytemuck::cast_slice(&mesh.vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
     }
 
     pub fn update_camera(&mut self, camera: &Camera) {
@@ -463,8 +487,11 @@ impl Renderer {
 
             pass.set_pipeline(&self.render_pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.draw(0..self.vertex_count, 0..1);
+            pass.set_vertex_buffer(0, self.static_vertex_buffer.slice(..));
+            pass.draw(0..self.static_vertex_count, 0..1);
+
+            pass.set_vertex_buffer(0, self.dynamic_vertex_buffer.slice(..));
+            pass.draw(0..self.dynamic_vertex_count, 0..1);
 
             pass.set_pipeline(&self.crosshair_pipeline);
             pass.draw(0..4, 0..1);
