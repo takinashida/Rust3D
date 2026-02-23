@@ -1,3 +1,15 @@
+struct Camera {
+    view_proj: mat4x4<f32>,
+    sun_direction: vec4<f32>,
+    camera_forward: vec4<f32>,
+    camera_right: vec4<f32>,
+    camera_up: vec4<f32>,
+    proj_params: vec4<f32>,
+};
+
+@group(0) @binding(0)
+var<uniform> camera: Camera;
+
 struct SkyOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -35,6 +47,25 @@ fn value_noise(uv: vec2<f32>) -> f32 {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+fn world_dir_to_uv(world_dir: vec3<f32>) -> vec2<f32> {
+    let dir = normalize(world_dir);
+    let forward = normalize(camera.camera_forward.xyz);
+    let right = normalize(camera.camera_right.xyz);
+    let up = normalize(camera.camera_up.xyz);
+
+    let x_cam = dot(dir, right);
+    let y_cam = dot(dir, up);
+    let z_cam = dot(dir, -forward);
+
+    let tan_half_fov_y = max(camera.proj_params.y, 1e-4);
+    let aspect = max(camera.proj_params.x, 1e-4);
+
+    let ndc_x = (x_cam / max(z_cam, 1e-4)) / (tan_half_fov_y * aspect);
+    let ndc_y = (y_cam / max(z_cam, 1e-4)) / tan_half_fov_y;
+
+    return vec2<f32>(ndc_x * 0.5 + 0.5, 0.5 - ndc_y * 0.5);
+}
+
 @fragment
 fn fs_main(in: SkyOut) -> @location(0) vec4<f32> {
     let t = clamp(in.uv.y, 0.0, 1.0);
@@ -42,11 +73,12 @@ fn fs_main(in: SkyOut) -> @location(0) vec4<f32> {
     let zenith = vec3<f32>(0.10, 0.24, 0.54);
     var base = mix(horizon, zenith, smoothstep(0.0, 1.0, t));
 
-    let sun_pos = vec2<f32>(0.72, 0.78);
+    let sun_dir = normalize(-camera.sun_direction.xyz);
+    let sun_pos = world_dir_to_uv(sun_dir);
     let sun_dist = distance(in.uv, sun_pos);
-    let sun_core = smoothstep(0.12, 0.0, sun_dist);
-    let sun_glow = smoothstep(0.35, 0.0, sun_dist) * 0.5;
-    base += vec3<f32>(1.0, 0.86, 0.62) * (sun_core * 0.9 + sun_glow * 0.45);
+    let sun_core = smoothstep(0.07, 0.0, sun_dist);
+    let sun_glow = smoothstep(0.28, 0.0, sun_dist) * 0.5;
+    base += vec3<f32>(1.0, 0.86, 0.62) * (sun_core * 1.0 + sun_glow * 0.5);
 
     let cloud_uv = in.uv * vec2<f32>(7.0, 3.8) + vec2<f32>(0.0, 0.2);
     let n1 = value_noise(cloud_uv);
