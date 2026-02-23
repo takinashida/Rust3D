@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use cgmath::{InnerSpace, Vector3};
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 
@@ -90,7 +91,7 @@ impl Renderer {
             label: Some("camera layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -161,7 +162,7 @@ impl Renderer {
 
         let sky_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sky pipeline layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&camera_layout],
             push_constant_ranges: &[],
         });
 
@@ -395,6 +396,27 @@ impl Renderer {
     pub fn update_camera(&mut self, camera: &Camera) {
         let mut uniform = CameraUniform::new();
         uniform.view_proj = camera.view_proj_matrix().into();
+        uniform.sun_direction = [
+            SUN_DIRECTION_WORLD.x,
+            SUN_DIRECTION_WORLD.y,
+            SUN_DIRECTION_WORLD.z,
+            0.0,
+        ];
+
+        let forward = camera.look_direction().normalize();
+        let right = forward.cross(Vector3::unit_y()).normalize();
+        let up = right.cross(forward).normalize();
+
+        uniform.camera_forward = [forward.x, forward.y, forward.z, 0.0];
+        uniform.camera_right = [right.x, right.y, right.z, 0.0];
+        uniform.camera_up = [up.x, up.y, up.z, 0.0];
+        uniform.proj_params = [
+            camera.aspect.max(0.01),
+            (camera.fov_y.to_radians() * 0.5).tan(),
+            0.0,
+            0.0,
+        ];
+
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[uniform]));
     }
@@ -512,6 +534,7 @@ impl Renderer {
             });
 
             pass.set_pipeline(&self.sky_pipeline);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.draw(0..3, 0..1);
 
             pass.set_pipeline(&self.render_pipeline);
@@ -573,6 +596,8 @@ impl DepthTexture {
         Self { view }
     }
 }
+
+const SUN_DIRECTION_WORLD: Vector3<f32> = Vector3::new(-0.45, -1.0, -0.30);
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -691,12 +716,27 @@ fn append_digit(
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    sun_direction: [f32; 4],
+    camera_forward: [f32; 4],
+    camera_right: [f32; 4],
+    camera_up: [f32; 4],
+    proj_params: [f32; 4],
 }
 
 impl CameraUniform {
     fn new() -> Self {
         Self {
             view_proj: cgmath::Matrix4::from_scale(1.0).into(),
+            sun_direction: [
+                SUN_DIRECTION_WORLD.x,
+                SUN_DIRECTION_WORLD.y,
+                SUN_DIRECTION_WORLD.z,
+                0.0,
+            ],
+            camera_forward: [0.0, 0.0, -1.0, 0.0],
+            camera_right: [1.0, 0.0, 0.0, 0.0],
+            camera_up: [0.0, 1.0, 0.0, 0.0],
+            proj_params: [16.0 / 9.0, (60.0_f32.to_radians() * 0.5).tan(), 0.0, 0.0],
         }
     }
 }

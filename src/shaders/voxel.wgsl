@@ -1,5 +1,10 @@
 struct Camera {
     view_proj: mat4x4<f32>,
+    sun_direction: vec4<f32>,
+    camera_forward: vec4<f32>,
+    camera_right: vec4<f32>,
+    camera_up: vec4<f32>,
+    proj_params: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -63,16 +68,18 @@ fn tri_planar_variation(world_pos: vec3<f32>, normal: vec3<f32>) -> f32 {
 @fragment
 fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
     let normal = normalize(input.normal);
-    let light_dir = normalize(vec3<f32>(-0.45, -1.0, -0.30));
-    let view_dir = normalize(vec3<f32>(0.0, 0.65, 1.0));
+    let light_dir = normalize(camera.sun_direction.xyz);
+    let view_dir = normalize(camera.camera_forward.xyz);
 
     let diffuse = max(dot(normal, -light_dir), 0.0);
     let half_vec = normalize(-light_dir + view_dir);
-    let specular = pow(max(dot(normal, half_vec), 0.0), 20.0) * 0.14;
+    let specular = pow(max(dot(normal, half_vec), 0.0), 22.0) * 0.12;
 
-    let ambient_sky = vec3<f32>(0.32, 0.39, 0.52);
-    let warm_bounce = vec3<f32>(0.17, 0.12, 0.08) * max(-normal.y, 0.0);
-    let ambient = ambient_sky * (0.4 + 0.6 * max(normal.y, 0.0)) + warm_bounce;
+    let ambient_sky = vec3<f32>(0.26, 0.32, 0.45);
+    let warm_bounce = vec3<f32>(0.18, 0.13, 0.09) * max(-normal.y, 0.0);
+    let ambient = ambient_sky * (0.45 + 0.55 * max(normal.y, 0.0)) + warm_bounce;
+
+    let sun_shadow = 0.25 + 0.75 * diffuse;
 
     let height_fade = clamp(0.5 + input.world_pos.y * 0.03, 0.5, 1.1);
 
@@ -82,7 +89,7 @@ fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
     let edge = edge_outline(input.world_pos, normal);
     let edge_darkening = mix(0.62, 1.0, edge);
 
-    let lit = albedo * (ambient + vec3<f32>(diffuse * 0.72)) * height_fade;
+    let lit = albedo * (ambient + vec3<f32>(0.82 * sun_shadow)) * height_fade;
     let final_color = lit * edge_darkening + specular;
 
     return vec4<f32>(final_color, 1.0);
