@@ -1,10 +1,7 @@
 use cgmath::{perspective, vec3, Deg, InnerSpace, Matrix4, Point3, Vector3};
 use winit::keyboard::KeyCode;
 
-use crate::world::{
-    chunk::{Block, CHUNK_DEPTH, CHUNK_WIDTH},
-    world::World,
-};
+use crate::world::{chunk::Block, world::World};
 
 use super::input::InputState;
 
@@ -26,7 +23,7 @@ pub struct Camera {
 impl Camera {
     pub fn new() -> Self {
         Self {
-            position: Point3::new(256.0, 36.0, 256.0),
+            position: Point3::new(0.0, 36.0, 0.0),
             yaw: -90.0,
             pitch: -15.0,
             aspect: 16.0 / 9.0,
@@ -120,9 +117,6 @@ impl Camera {
         if input.is_pressed(KeyCode::ArrowDown) {
             self.pitch = (self.pitch - 1.0).clamp(-89.0, 89.0);
         }
-
-        self.position.x = self.position.x.rem_euclid(CHUNK_WIDTH as f32);
-        self.position.z = self.position.z.rem_euclid(CHUNK_DEPTH as f32);
     }
 
     pub fn view_proj_matrix(&self) -> Matrix4<f32> {

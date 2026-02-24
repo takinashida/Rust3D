@@ -306,6 +306,10 @@ async fn run() {
 
             if mode == AppMode::Playing && !game_over {
                 camera.update(&input, &world);
+                if world.ensure_chunk_for_player(camera.position) {
+                    renderer.build_chunk_mesh(&world.chunk);
+                    let _ = world.chunk.take_dirty_regions();
+                }
                 let had_bullets = !world.bullets.is_empty();
                 let had_particles = !world.particles.is_empty();
                 let had_explosives = !world.explosives.is_empty();

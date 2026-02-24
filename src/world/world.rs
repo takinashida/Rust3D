@@ -109,8 +109,6 @@ impl World {
         ];
 
         for (x, z) in &mut preferred {
-            *x = x.clamp(2.5, CHUNK_WIDTH as f32 - 2.5);
-            *z = z.clamp(2.5, CHUNK_DEPTH as f32 - 2.5);
             if self
                 .highest_solid_below(*x, *z, CHUNK_HEIGHT as f32 - 1.0)
                 .is_some()
@@ -177,13 +175,8 @@ impl World {
             let y = bullet_position.y.floor() as i32;
             let z = bullet_position.z.floor() as i32;
 
-            let hit_block = x >= 0
-                && y >= 0
-                && z >= 0
-                && x < CHUNK_WIDTH as i32
-                && y < CHUNK_HEIGHT as i32
-                && z < CHUNK_DEPTH as i32
-                && self.chunk.get_i32(x, y, z) != Block::Air;
+            let hit_block =
+                y >= 0 && y < CHUNK_HEIGHT as i32 && self.chunk.get_i32(x, y, z) != Block::Air;
 
             if hit_block {
                 self.bullets.swap_remove(i);
@@ -301,7 +294,7 @@ impl World {
                     if dx * dx + dy * dy + dz * dz <= r2
                         && self.chunk.get_i32(x, y, z) != Block::Air
                     {
-                        self.break_block(x as usize, y as usize, z as usize);
+                        self.break_block(x, y, z);
                         changed = true;
                     }
                 }
@@ -490,16 +483,12 @@ impl World {
         (world_changed, player_damage)
     }
 
-    pub fn break_block(&mut self, x: usize, y: usize, z: usize) {
-        if x < CHUNK_WIDTH && y < CHUNK_HEIGHT && z < CHUNK_DEPTH {
-            self.chunk.set(x, y, z, Block::Air);
-        }
+    pub fn break_block(&mut self, x: i32, y: i32, z: i32) {
+        self.chunk.set_i32(x, y, z, Block::Air);
     }
 
-    pub fn set_block(&mut self, x: usize, y: usize, z: usize, block: Block) {
-        if x < CHUNK_WIDTH && y < CHUNK_HEIGHT && z < CHUNK_DEPTH {
-            self.chunk.set(x, y, z, block);
-        }
+    pub fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
+        self.chunk.set_i32(x, y, z, block);
     }
 
     pub fn break_block_from_ray(
@@ -523,16 +512,10 @@ impl World {
             let y = p.y.floor() as i32;
             let z = p.z.floor() as i32;
 
-            if x >= 0
-                && y >= 0
-                && z >= 0
-                && x < CHUNK_WIDTH as i32
-                && y < CHUNK_HEIGHT as i32
-                && z < CHUNK_DEPTH as i32
-            {
+            if y >= 0 && y < CHUNK_HEIGHT as i32 {
                 let block = self.chunk.get_i32(x, y, z);
                 if block != Block::Air {
-                    self.break_block(x as usize, y as usize, z as usize);
+                    self.break_block(x, y, z);
                     self.spawn_particles(p, 12, [0.8, 0.75, 0.65], 0.1, 25.0, 0.12);
                     return true;
                 }
@@ -571,20 +554,14 @@ impl World {
             let y = p.y.floor() as i32;
             let z = p.z.floor() as i32;
 
-            if x < 0
-                || y < 0
-                || z < 0
-                || x >= CHUNK_WIDTH as i32
-                || y >= CHUNK_HEIGHT as i32
-                || z >= CHUNK_DEPTH as i32
-            {
+            if y < 0 || y >= CHUNK_HEIGHT as i32 {
                 distance += step;
                 continue;
             }
 
             let current = self.chunk.get_i32(x, y, z);
             if current == Block::Air {
-                last_air = Some((x as usize, y as usize, z as usize));
+                last_air = Some((x, y, z));
             } else if let Some((ax, ay, az)) = last_air {
                 self.set_block(ax, ay, az, block);
                 return true;
@@ -604,6 +581,24 @@ impl World {
 
     pub fn highest_solid_below(&self, x: f32, z: f32, max_y: f32) -> Option<f32> {
         highest_solid_below_chunk(&self.chunk, x, z, max_y)
+    }
+
+    pub fn ensure_chunk_for_player(&mut self, player: Point3<f32>) -> bool {
+        let (origin_x, origin_z) = self.chunk.origin();
+        let margin = 96.0;
+        let min_x = origin_x as f32 + margin;
+        let max_x = (origin_x + CHUNK_WIDTH as i32) as f32 - margin;
+        let min_z = origin_z as f32 + margin;
+        let max_z = (origin_z + CHUNK_DEPTH as i32) as f32 - margin;
+
+        if player.x >= min_x && player.x <= max_x && player.z >= min_z && player.z <= max_z {
+            return false;
+        }
+
+        let new_origin_x = player.x.floor() as i32 - (CHUNK_WIDTH as i32 / 2);
+        let new_origin_z = player.z.floor() as i32 - (CHUNK_DEPTH as i32 / 2);
+        self.chunk.generate_at(new_origin_x, new_origin_z);
+        true
     }
 }
 
@@ -704,10 +699,6 @@ fn mob_collides_with_others(x: f32, z: f32, radius: f32, others: &[Mob]) -> bool
 fn highest_solid_below_chunk(chunk: &Chunk, x: f32, z: f32, max_y: f32) -> Option<f32> {
     let xi = x.floor() as i32;
     let zi = z.floor() as i32;
-
-    if xi < 0 || zi < 0 || xi >= CHUNK_WIDTH as i32 || zi >= CHUNK_DEPTH as i32 {
-        return None;
-    }
 
     let mut y = max_y.floor() as i32;
     y = y.min(CHUNK_HEIGHT as i32 - 1);
