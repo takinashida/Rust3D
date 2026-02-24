@@ -46,6 +46,8 @@ enum Biome {
 pub struct Chunk {
     blocks: Vec<Block>,
     dirty_regions: Vec<bool>,
+    origin_x: i32,
+    origin_z: i32,
 }
 
 impl Chunk {
@@ -56,7 +58,13 @@ impl Chunk {
         Self {
             blocks: vec![Block::Air; CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_DEPTH],
             dirty_regions: vec![true; regions_x * regions_y * regions_z],
+            origin_x: -(CHUNK_WIDTH as i32) / 2,
+            origin_z: -(CHUNK_DEPTH as i32) / 2,
         }
+    }
+
+    pub fn origin(&self) -> (i32, i32) {
+        (self.origin_x, self.origin_z)
     }
 
     fn index(x: usize, y: usize, z: usize) -> usize {
@@ -122,92 +130,71 @@ impl Chunk {
     }
 
     pub fn generate(&mut self) {
+        self.generate_at(self.origin_x, self.origin_z);
+    }
+
+    pub fn generate_at(&mut self, origin_x: i32, origin_z: i32) {
         const SEA_LEVEL: usize = 30;
+        self.origin_x = origin_x;
+        self.origin_z = origin_z;
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        use std::thread;
 
-        for x in 0..CHUNK_WIDTH {
-            for z in 0..CHUNK_DEPTH {
-                let biome = biome_at(x, z);
-                let h = terrain_height(x, z, biome).clamp(8, CHUNK_HEIGHT.saturating_sub(2));
+        let worker_count = thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .min(CHUNK_WIDTH.max(1));
+        let next_x = Arc::new(AtomicUsize::new(0));
 
-                for y in 0..=h {
-                    let depth = h.saturating_sub(y);
-                    let block = match biome {
-                        Biome::Desert => {
-                            if depth == 0 {
-                                Block::Sand
-                            } else if depth < 4 {
-                                Block::RedSand
-                            } else {
-                                stone_with_ores(x, y, z)
+        let mut slabs = vec![vec![Block::Air; CHUNK_HEIGHT * CHUNK_DEPTH]; CHUNK_WIDTH];
+        thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(worker_count);
+            for _ in 0..worker_count {
+                let next_x = Arc::clone(&next_x);
+                handles.push(scope.spawn(move || {
+                    let mut produced = Vec::new();
+                    loop {
+                        let x = next_x.fetch_add(1, Ordering::Relaxed);
+                        if x >= CHUNK_WIDTH {
+                            break;
+                        }
+                        let wx = origin_x + x as i32;
+                        let mut slab = vec![Block::Air; CHUNK_HEIGHT * CHUNK_DEPTH];
+                        for z in 0..CHUNK_DEPTH {
+                            let wz = origin_z + z as i32;
+                            let biome = biome_at(wx, wz);
+                            let h = terrain_height(wx, wz, biome)
+                                .clamp(8, CHUNK_HEIGHT.saturating_sub(2));
+                            for y in 0..CHUNK_HEIGHT {
+                                let idx = z * CHUNK_HEIGHT + y;
+                                slab[idx] = terrain_block_at(wx, y, wz, biome, h, SEA_LEVEL);
                             }
                         }
-                        Biome::Snow => {
-                            if depth == 0 {
-                                Block::Snow
-                            } else if depth < 3 {
-                                Block::Dirt
-                            } else {
-                                stone_with_ores(x, y, z)
-                            }
-                        }
-                        Biome::Swamp => {
-                            if depth == 0 {
-                                Block::Moss
-                            } else if depth < 4 {
-                                Block::Mud
-                            } else {
-                                stone_with_ores(x, y, z)
-                            }
-                        }
-                        Biome::Mountains => {
-                            if depth == 0 && h > 52 {
-                                Block::Snow
-                            } else {
-                                stone_with_ores(x, y, z)
-                            }
-                        }
-                        Biome::Forest => {
-                            if depth == 0 {
-                                Block::Grass
-                            } else if depth < 4 {
-                                Block::Dirt
-                            } else {
-                                stone_with_ores(x, y, z)
-                            }
-                        }
-                        Biome::Plains => {
-                            if depth == 0 {
-                                Block::Grass
-                            } else if depth < 3 {
-                                Block::Dirt
-                            } else {
-                                stone_with_ores(x, y, z)
-                            }
-                        }
-                    };
-                    self.set(x, y, z, block);
-                }
-
-                if h < SEA_LEVEL {
-                    for y in (h + 1)..=SEA_LEVEL.min(CHUNK_HEIGHT - 1) {
-                        self.set(
-                            x,
-                            y,
-                            z,
-                            if biome == Biome::Snow {
-                                Block::Ice
-                            } else {
-                                Block::Water
-                            },
-                        );
+                        produced.push((x, slab));
                     }
+                    produced
+                }));
+            }
+
+            for handle in handles {
+                for (x, slab) in handle.join().expect("terrain worker panicked") {
+                    slabs[x] = slab;
                 }
             }
+        });
+
+        for (x, slab) in slabs.into_iter().enumerate() {
+            let start = x * CHUNK_HEIGHT * CHUNK_DEPTH;
+            let end = start + CHUNK_HEIGHT * CHUNK_DEPTH;
+            self.blocks[start..end].copy_from_slice(&slab);
         }
 
         for x in (10..CHUNK_WIDTH - 10).step_by(24) {
             for z in (10..CHUNK_DEPTH - 10).step_by(24) {
-                match biome_at(x, z) {
+                match biome_at(origin_x + x as i32, origin_z + z as i32) {
                     Biome::Forest => self.add_tree(x, z),
                     Biome::Desert => self.add_cactus(x, z),
                     _ => {}
@@ -220,6 +207,7 @@ impl Chunk {
         self.add_house(340, 32, 300, 11, 8, 11);
         self.add_house(420, 34, 410, 16, 9, 13);
         self.add_target(250, 36, 256);
+        self.dirty_regions.fill(true);
     }
 
     fn add_house(&mut self, x0: usize, y0: usize, z0: usize, w: usize, h: usize, d: usize) {
@@ -266,9 +254,11 @@ impl Chunk {
             return;
         }
 
+        let wx = self.origin_x + x as i32;
+        let wz = self.origin_z + z as i32;
         let mut ground = None;
         for y in (0..CHUNK_HEIGHT).rev() {
-            let block = self.get_i32(x as i32, y as i32, z as i32);
+            let block = self.get_i32(wx, y as i32, wz);
             if block != Block::Air && block != Block::Water {
                 ground = Some(y + 1);
                 break;
@@ -288,7 +278,12 @@ impl Chunk {
         for lx in x.saturating_sub(2)..=(x + 2).min(CHUNK_WIDTH - 1) {
             for lz in z.saturating_sub(2)..=(z + 2).min(CHUNK_DEPTH - 1) {
                 for ly in top.saturating_sub(2)..=(top + 1).min(CHUNK_HEIGHT - 1) {
-                    if self.get_i32(lx as i32, ly as i32, lz as i32) == Block::Air {
+                    if self.get_i32(
+                        self.origin_x + lx as i32,
+                        ly as i32,
+                        self.origin_z + lz as i32,
+                    ) == Block::Air
+                    {
                         self.set(lx, ly, lz, Block::Leaf);
                     }
                 }
@@ -300,9 +295,11 @@ impl Chunk {
         if x >= CHUNK_WIDTH || z >= CHUNK_DEPTH {
             return;
         }
+        let wx = self.origin_x + x as i32;
+        let wz = self.origin_z + z as i32;
         let mut ground = None;
         for y in (0..CHUNK_HEIGHT).rev() {
-            let block = self.get_i32(x as i32, y as i32, z as i32);
+            let block = self.get_i32(wx, y as i32, wz);
             if block == Block::Sand || block == Block::RedSand {
                 ground = Some(y + 1);
                 break;
@@ -334,14 +331,15 @@ impl Chunk {
     }
 
     pub fn get_i32(&self, x: i32, y: i32, z: i32) -> Block {
-        if x < 0 || y < 0 || z < 0 {
+        if y < 0 || y >= CHUNK_HEIGHT as i32 {
             return Block::Air;
         }
-        let (x, y, z) = (x as usize, y as usize, z as usize);
-        if x >= CHUNK_WIDTH || y >= CHUNK_HEIGHT || z >= CHUNK_DEPTH {
-            Block::Air
+        let lx = x - self.origin_x;
+        let lz = z - self.origin_z;
+        if lx >= 0 && lz >= 0 && lx < CHUNK_WIDTH as i32 && lz < CHUNK_DEPTH as i32 {
+            self.blocks[Self::index(lx as usize, y as usize, lz as usize)]
         } else {
-            self.blocks[Self::index(x, y, z)]
+            procedural_block_at(x, y as usize, z)
         }
     }
 
@@ -354,13 +352,24 @@ impl Chunk {
             }
         }
     }
+
+    pub fn set_i32(&mut self, x: i32, y: i32, z: i32, block: Block) {
+        if y < 0 || y >= CHUNK_HEIGHT as i32 {
+            return;
+        }
+        let lx = x - self.origin_x;
+        let lz = z - self.origin_z;
+        if lx >= 0 && lz >= 0 && lx < CHUNK_WIDTH as i32 && lz < CHUNK_DEPTH as i32 {
+            self.set(lx as usize, y as usize, lz as usize, block);
+        }
+    }
 }
 
 fn noise(x: f32, z: f32, scale: f32, x_mul: f32, z_mul: f32) -> f32 {
     ((x * scale * x_mul).sin() + (z * scale * z_mul).cos()) * 0.5
 }
 
-fn biome_at(x: usize, z: usize) -> Biome {
+fn biome_at(x: i32, z: i32) -> Biome {
     let xf = x as f32;
     let zf = z as f32;
     let heat = noise(xf, zf, 0.017, 1.3, 1.1) + noise(xf, zf, 0.041, 1.0, 0.9) * 0.4;
@@ -381,7 +390,7 @@ fn biome_at(x: usize, z: usize) -> Biome {
     }
 }
 
-fn terrain_height(x: usize, z: usize, biome: Biome) -> usize {
+fn terrain_height(x: i32, z: i32, biome: Biome) -> usize {
     let xf = x as f32;
     let zf = z as f32;
     let macro_shape = noise(xf, zf, 0.011, 1.0, 1.0) * 9.0;
@@ -400,22 +409,90 @@ fn terrain_height(x: usize, z: usize, biome: Biome) -> usize {
     base.clamp(8.0, (CHUNK_HEIGHT - 2) as f32) as usize
 }
 
-fn stone_with_ores(x: usize, y: usize, z: usize) -> Block {
-    if y < 10 && (x + z + y) % 43 == 0 {
+fn stone_with_ores(x: i32, y: usize, z: i32) -> Block {
+    let h = ((x as i64).wrapping_mul(73_856_093) ^ (z as i64).wrapping_mul(19_349_663)).abs();
+    let salt = (h % 65_537) as usize;
+    let yi = y as i32;
+    if y < 10 && (x + z + yi) % 43 == 0 {
         Block::DiamondOre
-    } else if y < 20 && (x * 3 + z * 5 + y) % 37 == 0 {
+    } else if y < 20 && (x * 3 + z * 5 + yi) % 37 == 0 {
         Block::GoldOre
-    } else if y < 34 && (x * 7 + z * 11 + y * 2) % 29 == 0 {
+    } else if y < 34 && (x * 7 + z * 11 + yi * 2) % 29 == 0 {
         Block::IronOre
-    } else if y < 40 && (x * 13 + z * 17 + y * 3) % 19 == 0 {
+    } else if y < 40 && (x * 13 + z * 17 + yi * 3) % 19 == 0 {
         Block::CoalOre
     } else if y < 14 {
         Block::Basalt
-    } else if y < 26 && (x + z) % 9 == 0 {
+    } else if y < 26 && (salt + y) % 9 == 0 {
         Block::Gravel
-    } else if y < 28 && (x * 5 + z * 7) % 21 == 0 {
+    } else if y < 28 && (salt + y * 3) % 21 == 0 {
         Block::Clay
     } else {
         Block::Stone
     }
+}
+
+fn terrain_block_at(wx: i32, y: usize, wz: i32, biome: Biome, h: usize, sea_level: usize) -> Block {
+    if y > h {
+        if y <= sea_level {
+            return if biome == Biome::Snow {
+                Block::Ice
+            } else {
+                Block::Water
+            };
+        }
+        return Block::Air;
+    }
+    let depth = h.saturating_sub(y);
+    match biome {
+        Biome::Desert => {
+            if depth == 0 {
+                Block::Sand
+            } else if depth < 4 {
+                Block::RedSand
+            } else {
+                stone_with_ores(wx, y, wz)
+            }
+        }
+        Biome::Snow => {
+            if depth == 0 {
+                Block::Snow
+            } else if depth < 3 {
+                Block::Dirt
+            } else {
+                stone_with_ores(wx, y, wz)
+            }
+        }
+        Biome::Swamp => {
+            if depth == 0 {
+                Block::Moss
+            } else if depth < 4 {
+                Block::Mud
+            } else {
+                stone_with_ores(wx, y, wz)
+            }
+        }
+        Biome::Mountains => {
+            if depth == 0 && h > 52 {
+                Block::Snow
+            } else {
+                stone_with_ores(wx, y, wz)
+            }
+        }
+        Biome::Forest | Biome::Plains => {
+            if depth == 0 {
+                Block::Grass
+            } else if depth < 4 {
+                Block::Dirt
+            } else {
+                stone_with_ores(wx, y, wz)
+            }
+        }
+    }
+}
+
+fn procedural_block_at(x: i32, y: usize, z: i32) -> Block {
+    let biome = biome_at(x, z);
+    let h = terrain_height(x, z, biome).clamp(8, CHUNK_HEIGHT.saturating_sub(2));
+    terrain_block_at(x, y, z, biome, h, 30)
 }
