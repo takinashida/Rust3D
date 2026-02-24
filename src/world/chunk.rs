@@ -1,6 +1,6 @@
 pub const CHUNK_WIDTH: usize = 512;
 pub const CHUNK_DEPTH: usize = 512;
-pub const CHUNK_HEIGHT: usize = 64;
+pub const CHUNK_HEIGHT: usize = 96;
 pub const CHUNK_REGION_SIZE: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -17,6 +17,30 @@ pub enum Block {
     Leaf,
     Snow,
     Target,
+    Water,
+    Mud,
+    Cobblestone,
+    CoalOre,
+    IronOre,
+    GoldOre,
+    DiamondOre,
+    Gravel,
+    Clay,
+    Basalt,
+    Moss,
+    RedSand,
+    Ice,
+    Cactus,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Biome {
+    Plains,
+    Forest,
+    Desert,
+    Snow,
+    Mountains,
+    Swamp,
 }
 
 pub struct Chunk {
@@ -98,43 +122,104 @@ impl Chunk {
     }
 
     pub fn generate(&mut self) {
+        const SEA_LEVEL: usize = 30;
+
         for x in 0..CHUNK_WIDTH {
             for z in 0..CHUNK_DEPTH {
-                let n = ((x as f32 * 0.03).sin() + (z as f32 * 0.04).cos()) * 5.5
-                    + ((x as f32 * 0.011 + z as f32 * 0.017).sin()) * 6.5;
-                let base_height = (18.0 + n).clamp(8.0, 42.0) as usize;
+                let biome = biome_at(x, z);
+                let h = terrain_height(x, z, biome).clamp(8, CHUNK_HEIGHT.saturating_sub(2));
 
-                for y in 0..base_height {
-                    let block = if y + 5 < base_height {
-                        Block::Stone
-                    } else if y == base_height - 1 {
-                        if base_height < 14 {
-                            Block::Sand
-                        } else if base_height > 36 {
-                            Block::Snow
-                        } else {
-                            Block::Grass
+                for y in 0..=h {
+                    let depth = h.saturating_sub(y);
+                    let block = match biome {
+                        Biome::Desert => {
+                            if depth == 0 {
+                                Block::Sand
+                            } else if depth < 4 {
+                                Block::RedSand
+                            } else {
+                                stone_with_ores(x, y, z)
+                            }
                         }
-                    } else {
-                        Block::Dirt
+                        Biome::Snow => {
+                            if depth == 0 {
+                                Block::Snow
+                            } else if depth < 3 {
+                                Block::Dirt
+                            } else {
+                                stone_with_ores(x, y, z)
+                            }
+                        }
+                        Biome::Swamp => {
+                            if depth == 0 {
+                                Block::Moss
+                            } else if depth < 4 {
+                                Block::Mud
+                            } else {
+                                stone_with_ores(x, y, z)
+                            }
+                        }
+                        Biome::Mountains => {
+                            if depth == 0 && h > 52 {
+                                Block::Snow
+                            } else {
+                                stone_with_ores(x, y, z)
+                            }
+                        }
+                        Biome::Forest => {
+                            if depth == 0 {
+                                Block::Grass
+                            } else if depth < 4 {
+                                Block::Dirt
+                            } else {
+                                stone_with_ores(x, y, z)
+                            }
+                        }
+                        Biome::Plains => {
+                            if depth == 0 {
+                                Block::Grass
+                            } else if depth < 3 {
+                                Block::Dirt
+                            } else {
+                                stone_with_ores(x, y, z)
+                            }
+                        }
                     };
                     self.set(x, y, z, block);
+                }
+
+                if h < SEA_LEVEL {
+                    for y in (h + 1)..=SEA_LEVEL.min(CHUNK_HEIGHT - 1) {
+                        self.set(
+                            x,
+                            y,
+                            z,
+                            if biome == Biome::Snow {
+                                Block::Ice
+                            } else {
+                                Block::Water
+                            },
+                        );
+                    }
                 }
             }
         }
 
-        self.add_house(40, 20, 42, 12, 9, 10);
-        self.add_house(180, 24, 120, 14, 10, 12);
-        self.add_house(340, 19, 300, 11, 8, 11);
-        self.add_house(420, 22, 410, 16, 9, 13);
+        for x in (10..CHUNK_WIDTH - 10).step_by(24) {
+            for z in (10..CHUNK_DEPTH - 10).step_by(24) {
+                match biome_at(x, z) {
+                    Biome::Forest => self.add_tree(x, z),
+                    Biome::Desert => self.add_cactus(x, z),
+                    _ => {}
+                }
+            }
+        }
 
-        self.add_tree(64, 64);
-        self.add_tree(128, 220);
-        self.add_tree(258, 144);
-        self.add_tree(380, 333);
-        self.add_tree(470, 180);
-
-        self.add_target(250, 26, 256);
+        self.add_house(40, 28, 42, 12, 9, 10);
+        self.add_house(180, 30, 120, 14, 10, 12);
+        self.add_house(340, 32, 300, 11, 8, 11);
+        self.add_house(420, 34, 410, 16, 9, 13);
+        self.add_target(250, 36, 256);
     }
 
     fn add_house(&mut self, x0: usize, y0: usize, z0: usize, w: usize, h: usize, d: usize) {
@@ -148,7 +233,7 @@ impl Chunk {
                     if roof {
                         self.set(x, y, z, Block::Planks);
                     } else if floor {
-                        self.set(x, y, z, Block::Wood);
+                        self.set(x, y, z, Block::Cobblestone);
                     } else if wall {
                         let is_window = y > y0 + 1
                             && y < y0 + h - 2
@@ -181,15 +266,20 @@ impl Chunk {
             return;
         }
 
-        let mut ground = 0;
+        let mut ground = None;
         for y in (0..CHUNK_HEIGHT).rev() {
-            if self.get_i32(x as i32, y as i32, z as i32) != Block::Air {
-                ground = y + 1;
+            let block = self.get_i32(x as i32, y as i32, z as i32);
+            if block != Block::Air && block != Block::Water {
+                ground = Some(y + 1);
                 break;
             }
         }
 
-        let trunk_h = 6;
+        let Some(ground) = ground else {
+            return;
+        };
+
+        let trunk_h = 5 + ((x + z) % 3);
         for y in ground..(ground + trunk_h).min(CHUNK_HEIGHT) {
             self.set(x, y, z, Block::Wood);
         }
@@ -197,12 +287,34 @@ impl Chunk {
         let top = (ground + trunk_h).min(CHUNK_HEIGHT - 1);
         for lx in x.saturating_sub(2)..=(x + 2).min(CHUNK_WIDTH - 1) {
             for lz in z.saturating_sub(2)..=(z + 2).min(CHUNK_DEPTH - 1) {
-                for ly in top.saturating_sub(1)..=(top + 1).min(CHUNK_HEIGHT - 1) {
+                for ly in top.saturating_sub(2)..=(top + 1).min(CHUNK_HEIGHT - 1) {
                     if self.get_i32(lx as i32, ly as i32, lz as i32) == Block::Air {
                         self.set(lx, ly, lz, Block::Leaf);
                     }
                 }
             }
+        }
+    }
+
+    fn add_cactus(&mut self, x: usize, z: usize) {
+        if x >= CHUNK_WIDTH || z >= CHUNK_DEPTH {
+            return;
+        }
+        let mut ground = None;
+        for y in (0..CHUNK_HEIGHT).rev() {
+            let block = self.get_i32(x as i32, y as i32, z as i32);
+            if block == Block::Sand || block == Block::RedSand {
+                ground = Some(y + 1);
+                break;
+            }
+        }
+        let Some(ground) = ground else {
+            return;
+        };
+
+        let h = 2 + ((x * 17 + z * 11) % 3);
+        for y in ground..(ground + h).min(CHUNK_HEIGHT) {
+            self.set(x, y, z, Block::Cactus);
         }
     }
 
@@ -241,5 +353,69 @@ impl Chunk {
                 self.mark_region_dirty_by_block(x, y, z);
             }
         }
+    }
+}
+
+fn noise(x: f32, z: f32, scale: f32, x_mul: f32, z_mul: f32) -> f32 {
+    ((x * scale * x_mul).sin() + (z * scale * z_mul).cos()) * 0.5
+}
+
+fn biome_at(x: usize, z: usize) -> Biome {
+    let xf = x as f32;
+    let zf = z as f32;
+    let heat = noise(xf, zf, 0.017, 1.3, 1.1) + noise(xf, zf, 0.041, 1.0, 0.9) * 0.4;
+    let moisture = noise(xf, zf, 0.02, 0.7, 1.7) + noise(xf, zf, 0.052, 1.6, 0.8) * 0.5;
+
+    if heat > 0.62 {
+        Biome::Desert
+    } else if heat < -0.45 {
+        Biome::Snow
+    } else if moisture > 0.65 {
+        Biome::Swamp
+    } else if moisture < -0.35 {
+        Biome::Mountains
+    } else if moisture > 0.2 {
+        Biome::Forest
+    } else {
+        Biome::Plains
+    }
+}
+
+fn terrain_height(x: usize, z: usize, biome: Biome) -> usize {
+    let xf = x as f32;
+    let zf = z as f32;
+    let macro_shape = noise(xf, zf, 0.011, 1.0, 1.0) * 9.0;
+    let detail = noise(xf, zf, 0.042, 1.2, 0.8) * 3.5;
+    let ridge = noise(xf, zf, 0.083, 0.9, 1.4).abs() * 5.5;
+
+    let base = match biome {
+        Biome::Plains => 28.0 + macro_shape * 0.7 + detail,
+        Biome::Forest => 30.0 + macro_shape * 0.8 + detail,
+        Biome::Desert => 24.0 + macro_shape * 0.5 + detail * 0.6,
+        Biome::Snow => 34.0 + macro_shape * 0.8 + ridge,
+        Biome::Mountains => 40.0 + macro_shape * 1.4 + ridge * 1.3,
+        Biome::Swamp => 22.0 + macro_shape * 0.4,
+    };
+
+    base.clamp(8.0, (CHUNK_HEIGHT - 2) as f32) as usize
+}
+
+fn stone_with_ores(x: usize, y: usize, z: usize) -> Block {
+    if y < 10 && (x + z + y) % 43 == 0 {
+        Block::DiamondOre
+    } else if y < 20 && (x * 3 + z * 5 + y) % 37 == 0 {
+        Block::GoldOre
+    } else if y < 34 && (x * 7 + z * 11 + y * 2) % 29 == 0 {
+        Block::IronOre
+    } else if y < 40 && (x * 13 + z * 17 + y * 3) % 19 == 0 {
+        Block::CoalOre
+    } else if y < 14 {
+        Block::Basalt
+    } else if y < 26 && (x + z) % 9 == 0 {
+        Block::Gravel
+    } else if y < 28 && (x * 5 + z * 7) % 21 == 0 {
+        Block::Clay
+    } else {
+        Block::Stone
     }
 }
