@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bevy::{
     input::mouse::MouseMotion,
@@ -8,12 +8,15 @@ use bevy::{
 };
 use noise::{NoiseFn, Perlin};
 
-const WORLD_HALF_EXTENT: i32 = 20;
+const CHUNK_SIZE: i32 = 16;
+const RENDER_DISTANCE_CHUNKS: i32 = 4;
 const MIN_HEIGHT: i32 = 2;
-const MAX_HEIGHT: i32 = 9;
+const MAX_HEIGHT: i32 = 14;
 const REACH_DISTANCE: f32 = 6.0;
 const PLAYER_SPEED: f32 = 9.0;
 const MOUSE_SENSITIVITY: f32 = 0.003;
+const PLAYER_AIR_RADIUS: i32 = 1;
+const PLAYER_AIR_HEIGHT: i32 = 2;
 
 fn main() {
     App::new()
@@ -37,6 +40,7 @@ fn main() {
                 lock_cursor_on_click,
                 player_look,
                 player_movement,
+                stream_world_around_player,
                 block_interaction,
             ),
         )
@@ -46,6 +50,14 @@ fn main() {
 #[derive(Resource, Default)]
 struct WorldBlocks {
     map: HashMap<IVec3, (Entity, BlockType)>,
+    chunks: HashMap<IVec2, Vec<IVec3>>,
+}
+
+#[derive(Resource)]
+struct WorldGenerator {
+    noise: Perlin,
+    mesh: Handle<Mesh>,
+    generated_chunks: HashSet<IVec2>,
 }
 
 #[derive(Clone, Copy)]
@@ -75,7 +87,6 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut world: ResMut<WorldBlocks>,
 ) {
     let block_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
 
@@ -85,7 +96,11 @@ fn setup(
         stone: materials.add(Color::srgb(0.5, 0.5, 0.55)),
     };
 
-    generate_world(&mut commands, &mut world, &block_mesh, &block_materials);
+    commands.insert_resource(WorldGenerator {
+        noise: Perlin::new(1337),
+        mesh: block_mesh,
+        generated_chunks: HashSet::new(),
+    });
 
     commands.insert_resource(block_materials);
 
@@ -112,7 +127,6 @@ fn setup(
         Player { yaw, pitch },
     ));
 
-    // Tiny crosshair
     commands
         .spawn(NodeBundle {
             style: Style {
@@ -138,23 +152,86 @@ fn setup(
         });
 }
 
-fn generate_world(
+fn stream_world_around_player(
+    mut commands: Commands,
+    mut world: ResMut<WorldBlocks>,
+    mut world_gen: ResMut<WorldGenerator>,
+    materials: Res<BlockMaterials>,
+    player: Query<&Transform, With<Player>>,
+) {
+    let player_pos = player.single().translation.round().as_ivec3();
+    let center_chunk = world_to_chunk(player_pos);
+
+    let mut required_chunks = HashSet::new();
+    for cx in -RENDER_DISTANCE_CHUNKS..=RENDER_DISTANCE_CHUNKS {
+        for cz in -RENDER_DISTANCE_CHUNKS..=RENDER_DISTANCE_CHUNKS {
+            required_chunks.insert(center_chunk + IVec2::new(cx, cz));
+        }
+    }
+
+    for &chunk in &required_chunks {
+        if world_gen.generated_chunks.contains(&chunk) {
+            continue;
+        }
+
+        generate_chunk(
+            &mut commands,
+            &mut world,
+            &world_gen,
+            &materials,
+            chunk,
+            player_pos,
+        );
+        world_gen.generated_chunks.insert(chunk);
+    }
+
+    let obsolete_chunks: Vec<IVec2> = world_gen
+        .generated_chunks
+        .iter()
+        .copied()
+        .filter(|chunk| !required_chunks.contains(chunk))
+        .collect();
+
+    for chunk in obsolete_chunks {
+        unload_chunk(&mut commands, &mut world, &mut world_gen, chunk);
+    }
+}
+
+fn world_to_chunk(position: IVec3) -> IVec2 {
+    IVec2::new(
+        position.x.div_euclid(CHUNK_SIZE),
+        position.z.div_euclid(CHUNK_SIZE),
+    )
+}
+
+fn chunk_to_world_min(chunk: IVec2) -> IVec2 {
+    IVec2::new(chunk.x * CHUNK_SIZE, chunk.y * CHUNK_SIZE)
+}
+
+fn generate_chunk(
     commands: &mut Commands,
     world: &mut WorldBlocks,
-    mesh: &Handle<Mesh>,
+    world_gen: &WorldGenerator,
     materials: &BlockMaterials,
+    chunk: IVec2,
+    player_position: IVec3,
 ) {
-    let noise = Perlin::new(1337);
+    let min = chunk_to_world_min(chunk);
+    let mut positions = Vec::with_capacity((CHUNK_SIZE * CHUNK_SIZE * (MAX_HEIGHT + 1)) as usize);
 
-    for x in -WORLD_HALF_EXTENT..=WORLD_HALF_EXTENT {
-        for z in -WORLD_HALF_EXTENT..=WORLD_HALF_EXTENT {
-            let sample = noise.get([x as f64 * 0.08, z as f64 * 0.08]) as f32;
+    for x in min.x..(min.x + CHUNK_SIZE) {
+        for z in min.y..(min.y + CHUNK_SIZE) {
+            let sample = world_gen.noise.get([x as f64 * 0.08, z as f64 * 0.08]) as f32;
             let normalized = (sample + 1.0) * 0.5;
             let height =
                 MIN_HEIGHT + ((MAX_HEIGHT - MIN_HEIGHT) as f32 * normalized).round() as i32;
 
             for y in 0..=height {
                 let position = IVec3::new(x, y, z);
+                if is_player_air_cell(position, player_position) {
+                    continue;
+                }
+
                 let block_type = if y == height {
                     BlockType::Grass
                 } else if y > height - 3 {
@@ -163,10 +240,47 @@ fn generate_world(
                     BlockType::Stone
                 };
 
-                spawn_block(commands, world, mesh, materials, position, block_type);
+                spawn_block(
+                    commands,
+                    world,
+                    &world_gen.mesh,
+                    materials,
+                    position,
+                    block_type,
+                );
+                positions.push(position);
             }
         }
     }
+
+    world.chunks.insert(chunk, positions);
+}
+
+fn unload_chunk(
+    commands: &mut Commands,
+    world: &mut WorldBlocks,
+    world_gen: &mut WorldGenerator,
+    chunk: IVec2,
+) {
+    if let Some(blocks) = world.chunks.remove(&chunk) {
+        for position in blocks {
+            if let Some((entity, _)) = world.map.remove(&position) {
+                commands.entity(entity).despawn_recursive();
+            }
+        }
+    }
+
+    world_gen.generated_chunks.remove(&chunk);
+}
+
+fn is_player_air_cell(position: IVec3, player_position: IVec3) -> bool {
+    let dx = (position.x - player_position.x).abs();
+    let dz = (position.z - player_position.z).abs();
+    let in_horizontal = dx <= PLAYER_AIR_RADIUS && dz <= PLAYER_AIR_RADIUS;
+    let in_vertical =
+        position.y >= player_position.y - 1 && position.y <= player_position.y + PLAYER_AIR_HEIGHT;
+
+    in_horizontal && in_vertical
 }
 
 fn material_for(block_type: BlockType, materials: &BlockMaterials) -> Handle<StandardMaterial> {
@@ -292,7 +406,7 @@ fn block_interaction(
     mut commands: Commands,
     mut world: ResMut<WorldBlocks>,
     block_materials: Res<BlockMaterials>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    world_gen: Res<WorldGenerator>,
     camera: Query<&Transform, With<Player>>,
 ) {
     if !mouse.just_pressed(MouseButton::Left) && !mouse.just_pressed(MouseButton::Right) {
@@ -325,24 +439,29 @@ fn block_interaction(
         if let Some(cell) = hit_cell {
             if let Some((entity, _)) = world.map.remove(&cell) {
                 commands.entity(entity).despawn_recursive();
+                if let Some(chunk_blocks) = world.chunks.get_mut(&world_to_chunk(cell)) {
+                    chunk_blocks.retain(|&p| p != cell);
+                }
             }
         }
     }
 
-    if mouse.just_pressed(MouseButton::Right) {
-        if hit_cell.is_some() {
-            if let Some(place_pos) = previous_cell {
-                if !world.map.contains_key(&place_pos) {
-                    let mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-                    spawn_block(
-                        &mut commands,
-                        &mut world,
-                        &mesh,
-                        &block_materials,
-                        place_pos,
-                        BlockType::Grass,
-                    );
-                }
+    if mouse.just_pressed(MouseButton::Right) && hit_cell.is_some() {
+        if let Some(place_pos) = previous_cell {
+            if !world.map.contains_key(&place_pos) {
+                spawn_block(
+                    &mut commands,
+                    &mut world,
+                    &world_gen.mesh,
+                    &block_materials,
+                    place_pos,
+                    BlockType::Grass,
+                );
+                world
+                    .chunks
+                    .entry(world_to_chunk(place_pos))
+                    .or_default()
+                    .push(place_pos);
             }
         }
     }
